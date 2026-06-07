@@ -4,10 +4,22 @@ import { robinhoodLogin } from "@/lib/brokers/robinhood";
 import { encrypt } from "@/lib/utils/encryption";
 import { isBoundedString, isValidMfaCode } from "@/lib/utils/validation";
 import { enforceRateLimit } from "@/lib/utils/rateLimit";
+import { isRobinhoodExperimentalEnabled } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
+  // Robinhood uses an UNOFFICIAL API and is disabled unless explicitly enabled.
+  if (!isRobinhoodExperimentalEnabled()) {
+    return NextResponse.json(
+      {
+        error:
+          "Robinhood is an experimental, unofficial integration and is disabled on this deployment. It is not recommended for real accounts.",
+      },
+      { status: 403 }
+    );
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -15,7 +27,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   // Brute-force protection: credential submission is tightly limited.
-  const limited = enforceRateLimit(req, {
+  const limited = await enforceRateLimit(req, {
     scope: "connect-robinhood",
     limit: 8,
     windowMs: 5 * 60_000,

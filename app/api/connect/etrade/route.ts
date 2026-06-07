@@ -3,15 +3,20 @@ import { createClient } from "@/lib/supabase/server";
 import { getETradeRequestToken, getETradeAccessToken } from "@/lib/brokers/etrade";
 import { encrypt } from "@/lib/utils/encryption";
 import { enforceRateLimit } from "@/lib/utils/rateLimit";
+import { BrokerNotConfiguredError } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
+const SECRET_COOKIE = "etrade_token_secret";
+
 export async function GET(req: NextRequest) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const limited = enforceRateLimit(req, {
+  const limited = await enforceRateLimit(req, {
     scope: "connect-etrade",
     limit: 20,
     windowMs: 5 * 60_000,
@@ -21,51 +26,64 @@ export async function GET(req: NextRequest) {
 
   const action = req.nextUrl.searchParams.get("action");
 
-  if (action === "initiate") {
-    const { oauthToken, oauthTokenSecret, authorizeUrl } = await getETradeRequestToken();
+  try {
+    if (action === "initiate") {
+      const { oauthToken, oauthTokenSecret, authorizeUrl } = await getETradeRequestToken();
 
-    const response = NextResponse.json({ authorizeUrl, oauthToken });
-    response.cookies.set("etrade_token_secret", oauthTokenSecret, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 600,
-    });
-    return response;
-  }
-
-  if (action === "callback") {
-    const oauthToken = req.nextUrl.searchParams.get("oauth_token") ?? "";
-    const verifier = req.nextUrl.searchParams.get("oauth_verifier") ?? "";
-    const oauthTokenSecret = req.cookies.get("etrade_token_secret")?.value ?? "";
-
-    if (!verifier || !oauthTokenSecret) {
-      return NextResponse.json({ error: "Missing OAuth parameters" }, { status: 400 });
+      const response = NextResponse.json({ authorizeUrl, oauthToken });
+      // The request-token secret is the CSRF binding for OAuth 1.0a — httpOnly.
+      response.cookies.set(SECRET_COOKIE, oauthTokenSecret, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+        maxAge: 600,
+      });
+      return response;
     }
 
-    const { accessToken, accessTokenSecret } = await getETradeAccessToken(
-      oauthToken,
-      oauthTokenSecret,
-      verifier
-    );
+    if (action === "callback") {
+      const oauthToken = req.nextUrl.searchParams.get("oauth_token") ?? "";
+      const verifier = req.nextUrl.searchParams.get("oauth_verifier") ?? "";
+      const oauthTokenSecret = req.cookies.get(SECRET_COOKIE)?.value ?? "";
 
-    const encryptedToken = encrypt(accessToken);
-    const encryptedSecret = encrypt(accessTokenSecret);
+      if (!verifier || !oauthTokenSecret) {
+        return NextResponse.json(
+          { error: "Missing OAuth parameters — please restart the connection." },
+          { status: 400 }
+        );
+      }
 
-    await supabase.from("broker_accounts").upsert(
-      {
-        user_id: user.id,
-        broker_name: "etrade",
-        access_token: encryptedToken,
-        refresh_token: encryptedSecret,
-        connection_type: "oauth",
-        status: "active",
-      },
-      { onConflict: "user_id,broker_name" }
-    );
+      const { accessToken, accessTokenSecret } = await getETradeAccessToken(
+        oauthToken,
+        oauthTokenSecret,
+        verifier
+      );
 
-    return NextResponse.json({ success: true });
+      const { error } = await supabase.from("broker_accounts").upsert(
+        {
+          user_id: user.id,
+          broker_name: "etrade",
+          access_token: encrypt(accessToken),
+          refresh_token: encrypt(accessTokenSecret),
+          connection_type: "oauth",
+          status: "active",
+        },
+        { onConflict: "user_id,broker_name" }
+      );
+      if (error) return NextResponse.json({ error: "Failed to save connection" }, { status: 500 });
+
+      const res = NextResponse.json({ success: true });
+      res.cookies.delete(SECRET_COOKIE);
+      return res;
+    }
+
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  } catch (err) {
+    if (err instanceof BrokerNotConfiguredError) {
+      return NextResponse.json({ error: err.message }, { status: 503 });
+    }
+    const message = err instanceof Error ? err.message : "E*TRADE connection failed";
+    return NextResponse.json({ error: message }, { status: 502 });
   }
-
-  return NextResponse.json({ error: "Invalid action" }, { status: 400 });
 }

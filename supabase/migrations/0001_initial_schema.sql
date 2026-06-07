@@ -1,6 +1,7 @@
 -- ============================================================
--- StockBoard — Supabase Schema
--- Run this entire file in the Supabase SQL Editor
+-- StockBoard — 0001 Initial Schema (canonical, fresh install)
+-- Run in the Supabase SQL Editor, or via the Supabase CLI.
+-- Idempotent: safe to re-run.
 -- ============================================================
 
 -- Broker accounts linked to each user
@@ -41,7 +42,7 @@ CREATE TABLE IF NOT EXISTS holdings (
   UNIQUE(account_id, ticker)
 );
 
--- Transaction history
+-- Transaction history (read-only view in the app; not yet populated by sync)
 CREATE TABLE IF NOT EXISTS transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -56,7 +57,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Price cache
+-- Price cache (written only by server/service-role; read by authenticated users)
 CREATE TABLE IF NOT EXISTS price_cache (
   ticker TEXT PRIMARY KEY,
   current_price DECIMAL(18,4),
@@ -66,7 +67,7 @@ CREATE TABLE IF NOT EXISTS price_cache (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Portfolio snapshots for performance chart
+-- Portfolio snapshots for the performance chart
 CREATE TABLE IF NOT EXISTS portfolio_snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -77,43 +78,81 @@ CREATE TABLE IF NOT EXISTS portfolio_snapshots (
   UNIQUE(user_id, snapshot_date)
 );
 
+-- Sync logs — every sync attempt's outcome, surfaced to the user
+CREATE TABLE IF NOT EXISTS sync_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  account_id UUID REFERENCES broker_accounts(id) ON DELETE SET NULL,
+  broker_name TEXT NOT NULL,
+  status TEXT NOT NULL,            -- 'success' | 'failed' | 'skipped'
+  holdings_synced INT DEFAULT 0,
+  holdings_removed INT DEFAULT 0,
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- Indexes for common query patterns
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_holdings_user_id ON holdings(user_id);
+CREATE INDEX IF NOT EXISTS idx_holdings_account_id ON holdings(account_id);
+CREATE INDEX IF NOT EXISTS idx_broker_accounts_user_broker ON broker_accounts(user_id, broker_name);
+CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_id, transaction_date DESC);
+CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_user_date ON portfolio_snapshots(user_id, snapshot_date DESC);
+CREATE INDEX IF NOT EXISTS idx_sync_logs_user_created ON sync_logs(user_id, created_at DESC);
+
 -- ============================================================
 -- Row Level Security
 -- ============================================================
-
 ALTER TABLE broker_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE holdings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE portfolio_snapshots ENABLE ROW LEVEL SECURITY;
--- price_cache: RLS enabled below; authenticated read-only, service-role writes.
+ALTER TABLE sync_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE price_cache ENABLE ROW LEVEL SECURITY;
 
--- broker_accounts policies
+DROP POLICY IF EXISTS "Users can manage their own broker accounts" ON broker_accounts;
 CREATE POLICY "Users can manage their own broker accounts"
   ON broker_accounts FOR ALL USING (auth.uid() = user_id);
 
--- holdings policies
+DROP POLICY IF EXISTS "Users can manage their own holdings" ON holdings;
 CREATE POLICY "Users can manage their own holdings"
   ON holdings FOR ALL USING (auth.uid() = user_id);
 
--- transactions policies
+DROP POLICY IF EXISTS "Users can manage their own transactions" ON transactions;
 CREATE POLICY "Users can manage their own transactions"
   ON transactions FOR ALL USING (auth.uid() = user_id);
 
--- portfolio_snapshots policies
+DROP POLICY IF EXISTS "Users can manage their own snapshots" ON portfolio_snapshots;
 CREATE POLICY "Users can manage their own snapshots"
   ON portfolio_snapshots FOR ALL USING (auth.uid() = user_id);
 
--- price_cache: authenticated users may READ only.
--- Writes are performed exclusively by server-side code using the service-role
--- key, which BYPASSES RLS. We deliberately do NOT grant INSERT/UPDATE/DELETE to
--- the `authenticated` role, so a malicious client can never poison cached prices.
-ALTER TABLE price_cache ENABLE ROW LEVEL SECURITY;
+-- sync_logs: users may READ their own; writes happen via service-role (bypasses RLS).
+DROP POLICY IF EXISTS "Users can read their own sync logs" ON sync_logs;
+CREATE POLICY "Users can read their own sync logs"
+  ON sync_logs FOR SELECT USING (auth.uid() = user_id);
 
+-- price_cache: authenticated READ only. Writes are service-role only (bypasses RLS),
+-- so a malicious client can never poison cached prices.
+DROP POLICY IF EXISTS "Authenticated users can read price cache" ON price_cache;
 CREATE POLICY "Authenticated users can read price cache"
   ON price_cache FOR SELECT USING (auth.role() = 'authenticated');
 
 -- ============================================================
--- Realtime — enable for price_cache updates
+-- Realtime — push price + holdings updates to the client
 -- ============================================================
-ALTER PUBLICATION supabase_realtime ADD TABLE price_cache;
-ALTER PUBLICATION supabase_realtime ADD TABLE holdings;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'price_cache'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE price_cache;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'holdings'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE holdings;
+  END IF;
+END $$;

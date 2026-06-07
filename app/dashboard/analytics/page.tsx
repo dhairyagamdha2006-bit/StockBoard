@@ -3,12 +3,11 @@
 import { useMemo } from "react";
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Treemap,
+  BarChart, Bar, XAxis, YAxis, Treemap,
 } from "recharts";
 import { usePortfolioStats } from "@/hooks/usePortfolioStats";
 import { Card } from "@/components/ui/Card";
 import { formatCurrency, formatPercent } from "@/lib/utils/formatters";
-import { clsx } from "clsx";
 
 const SECTOR_COLORS = [
   "#4ade80", "#22d3ee", "#a78bfa", "#fb923c", "#f472b6",
@@ -24,6 +23,34 @@ const CustomPieTooltip = ({ active, payload }: { active?: boolean; payload?: { n
     </div>
   );
 };
+
+// Defined at module scope (not inside the component) so React keeps a stable
+// component identity across renders.
+const TreemapCell = ({
+  x,
+  y,
+  width,
+  height,
+  name,
+  pct,
+}: {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  name?: string;
+  pct?: number;
+  root?: unknown;
+}) => (
+  <g>
+    <rect x={x} y={y} width={width} height={height} fill={(pct ?? 0) >= 0 ? "#4ade8033" : "#f8717133"} stroke="#fff" strokeWidth={2} rx={4} />
+    {(width ?? 0) > 40 && (height ?? 0) > 24 && (
+      <text x={(x ?? 0) + (width ?? 0) / 2} y={(y ?? 0) + (height ?? 0) / 2} textAnchor="middle" dominantBaseline="middle" className="font-mono" fontSize={11} fill={(pct ?? 0) >= 0 ? "#4ade80" : "#f87171"}>
+        {name}
+      </text>
+    )}
+  </g>
+);
 
 export default function AnalyticsPage() {
   const { holdings, loading } = usePortfolioStats();
@@ -60,17 +87,6 @@ export default function AnalyticsPage() {
   const treemapData = useMemo(
     () => holdings.map((h) => ({ name: h.ticker, size: h.market_value ?? 0, pct: h.total_gain_loss_pct ?? 0 })),
     [holdings]
-  );
-
-  const TreemapCell = ({ x, y, width, height, name, pct }: { x?: number; y?: number; width?: number; height?: number; name?: string; pct?: number; root?: unknown }) => (
-    <g>
-      <rect x={x} y={y} width={width} height={height} fill={(pct ?? 0) >= 0 ? "#4ade8033" : "#f8717133"} stroke="#fff" strokeWidth={2} rx={4} />
-      {(width ?? 0) > 40 && (height ?? 0) > 24 && (
-        <text x={(x ?? 0) + (width ?? 0) / 2} y={(y ?? 0) + (height ?? 0) / 2} textAnchor="middle" dominantBaseline="middle" className="font-mono" fontSize={11} fill={(pct ?? 0) >= 0 ? "#4ade80" : "#f87171"}>
-          {name}
-        </text>
-      )}
-    </g>
   );
 
   return (

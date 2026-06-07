@@ -50,7 +50,7 @@ export default function LandingPage() {
         </h1>
 
         <p className="text-lg text-gray-500 dark:text-gray-400 max-w-xl mx-auto mb-10 leading-relaxed">
-          StockBoard connects Robinhood, Fidelity, E*TRADE, and Charles Schwab into
+          StockBoard brings your Fidelity, E*TRADE, and Charles Schwab holdings into
           a single auto-updating portfolio view — so you always know where you stand.
         </p>
 
@@ -81,13 +81,13 @@ export default function LandingPage() {
             },
             {
               icon: "🏦",
-              title: "4 Brokers, One View",
-              desc: "Robinhood, Fidelity, E*TRADE, and Charles Schwab — all connected with secure OAuth or CSV import.",
+              title: "Multiple Brokers, One View",
+              desc: "Fidelity via CSV import, plus E*TRADE and Charles Schwab via their official read-only OAuth APIs. (Robinhood is an opt-in experimental integration.)",
             },
             {
               icon: "📊",
-              title: "Full Analytics",
-              desc: "Performance charts, sector breakdowns, top gainers/losers, and complete transaction history.",
+              title: "Portfolio Analytics",
+              desc: "Performance chart from daily snapshots, broker allocation breakdown, and top gainers/losers across your holdings.",
             },
             {
               icon: "🔒",

@@ -1,25 +1,32 @@
 import type { AlpacaSnapshot } from "@/types";
+import { getAlpacaCreds } from "@/lib/env";
 
+/**
+ * Alpaca market-data client (REST snapshots).
+ *
+ * Note: the dashboard refreshes prices by polling this endpoint every ~30s and
+ * via Supabase Realtime pushes on the price_cache table. There is intentionally
+ * NO browser WebSocket to Alpaca — that would require exposing API keys to the
+ * client, which we don't do.
+ */
 const ALPACA_DATA_BASE = "https://data.alpaca.markets/v2";
-const WS_URL = "wss://stream.data.alpaca.markets/v2/iex";
 
-const AUTH_HEADERS = {
-  "APCA-API-KEY-ID": process.env.ALPACA_API_KEY ?? "",
-  "APCA-API-SECRET-KEY": process.env.ALPACA_SECRET_KEY ?? "",
-};
+function authHeaders(): Record<string, string> {
+  const { keyId, secretKey } = getAlpacaCreds();
+  return { "APCA-API-KEY-ID": keyId, "APCA-API-SECRET-KEY": secretKey };
+}
 
-export async function getSnapshots(
-  tickers: string[]
-): Promise<Map<string, AlpacaSnapshot>> {
+export async function getSnapshots(tickers: string[]): Promise<Map<string, AlpacaSnapshot>> {
   if (tickers.length === 0) return new Map();
 
   const params = new URLSearchParams({ symbols: tickers.join(",") });
   const res = await fetch(`${ALPACA_DATA_BASE}/stocks/snapshots?${params}`, {
-    headers: AUTH_HEADERS,
+    headers: authHeaders(),
   });
 
   if (!res.ok) {
-    console.error("Alpaca snapshots failed:", await res.text());
+    // Log status only — never the response body (avoids leaking any echoed creds).
+    console.error(`Alpaca snapshots request failed with status ${res.status}`);
     return new Map();
   }
 
@@ -27,9 +34,16 @@ export async function getSnapshots(
   return new Map(Object.entries(data));
 }
 
-export async function getLatestBars(tickers: string[]): Promise<Map<string, { price: number; prevClose: number; change: number; changePct: number }>> {
+export interface PriceQuote {
+  price: number;
+  prevClose: number;
+  change: number;
+  changePct: number;
+}
+
+export async function getLatestBars(tickers: string[]): Promise<Map<string, PriceQuote>> {
   const snapshots = await getSnapshots(tickers);
-  const result = new Map<string, { price: number; prevClose: number; change: number; changePct: number }>();
+  const result = new Map<string, PriceQuote>();
 
   for (const [symbol, snap] of Array.from(snapshots)) {
     const price = snap.latestTrade?.p ?? snap.minuteBar?.c ?? 0;
@@ -40,36 +54,4 @@ export async function getLatestBars(tickers: string[]): Promise<Map<string, { pr
   }
 
   return result;
-}
-
-export function createAlpacaWebSocket(
-  tickers: string[],
-  onUpdate: (symbol: string, price: number) => void
-): WebSocket {
-  const ws = new WebSocket(WS_URL);
-
-  ws.onopen = () => {
-    ws.send(JSON.stringify({
-      action: "auth",
-      key: process.env.ALPACA_API_KEY,
-      secret: process.env.ALPACA_SECRET_KEY,
-    }));
-  };
-
-  ws.onmessage = (event) => {
-    try {
-      const messages = JSON.parse(event.data as string);
-      for (const msg of messages) {
-        if (msg.T === "authenticated") {
-          ws.send(JSON.stringify({ action: "subscribe", trades: tickers }));
-        } else if (msg.T === "t" && msg.S && msg.p) {
-          onUpdate(msg.S, msg.p);
-        }
-      }
-    } catch (e) {
-      console.error("WS parse error:", e);
-    }
-  };
-
-  return ws;
 }

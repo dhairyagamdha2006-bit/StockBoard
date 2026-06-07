@@ -1,20 +1,16 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-
-function validUrl(raw: string | undefined): string {
-  try { new URL(raw ?? ""); return raw!; } catch { return "https://placeholder.supabase.co"; }
-}
-const SUPABASE_URL = validUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.startsWith("ey")
-  ? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  : "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder";
+import { getEnv } from "@/lib/env";
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
+  // Fails loudly (and identically everywhere) if the core env is misconfigured.
+  const env = getEnv();
+
   const supabase = createServerClient(
-    SUPABASE_URL,
-    SUPABASE_ANON_KEY,
+    env.NEXT_PUBLIC_SUPABASE_URL,
+    env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     {
       cookies: {
         getAll() {

@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const limited = enforceRateLimit(req, {
+  const limited = await enforceRateLimit(req, {
     scope: "prices",
     limit: 60,
     windowMs: 60_000,

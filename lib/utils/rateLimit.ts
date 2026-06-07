@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getUpstashConfig } from "@/lib/env";
 
 /**
- * Lightweight in-memory fixed-window rate limiter.
+ * Rate limiting with a production backend and a dev fallback.
  *
- * This is intentionally dependency-free and works well for a single Vercel
- * instance / local dev. For multi-region production scale, swap the Map for
- * Upstash Redis (`@upstash/ratelimit`) — the call sites stay identical.
+ * - If UPSTASH_REDIS_REST_URL/TOKEN are set, we use Upstash Redis (sliding
+ *   window) so limits hold across serverless instances and regions.
+ * - Otherwise we fall back to an in-memory fixed-window limiter, which is fine
+ *   for local dev / single-instance but resets per instance.
+ *
+ * The Upstash path is async; the in-memory path is sync. `enforceRateLimit` is
+ * async and handles both transparently, so call sites just `await` it.
  */
 
 interface Bucket {
@@ -14,9 +19,8 @@ interface Bucket {
 }
 
 const buckets = new Map<string, Bucket>();
-
-// Periodically evict expired buckets so the Map doesn't grow unbounded.
 let lastSweep = 0;
+
 function sweep(now: number) {
   if (now - lastSweep < 60_000) return;
   lastSweep = now;
@@ -28,10 +32,11 @@ function sweep(now: number) {
 export interface RateLimitResult {
   ok: boolean;
   remaining: number;
-  resetAt: number;
+  resetAt: number; // epoch ms
   limit: number;
 }
 
+/** Synchronous in-memory limiter (also exported for tests). */
 export function rateLimit(key: string, limit: number, windowMs: number): RateLimitResult {
   const now = Date.now();
   sweep(now);
@@ -48,7 +53,50 @@ export function rateLimit(key: string, limit: number, windowMs: number): RateLim
   return { ok, remaining: Math.max(0, limit - existing.count), resetAt: existing.resetAt, limit };
 }
 
-/** Derives a stable client identifier from a request (user id preferred, else IP). */
+// ---------------------------------------------------------------------------
+// Upstash Redis backend (lazy-initialized, optional).
+// ---------------------------------------------------------------------------
+type UpstashLimiter = {
+  limit: (key: string) => Promise<{ success: boolean; remaining: number; reset: number; limit: number }>;
+};
+const upstashLimiters = new Map<string, UpstashLimiter>();
+let upstashUnavailable = false;
+
+async function getUpstashLimiter(
+  scope: string,
+  limit: number,
+  windowMs: number
+): Promise<UpstashLimiter | null> {
+  if (upstashUnavailable) return null;
+  const cfg = getUpstashConfig();
+  if (!cfg) return null;
+
+  const cacheKey = `${scope}:${limit}:${windowMs}`;
+  const cached = upstashLimiters.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const [{ Ratelimit }, { Redis }] = await Promise.all([
+      import("@upstash/ratelimit"),
+      import("@upstash/redis"),
+    ]);
+    const redis = new Redis({ url: cfg.url, token: cfg.token });
+    const limiter = new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(limit, `${windowMs} ms`),
+      prefix: `stockboard:${scope}`,
+      analytics: false,
+    });
+    upstashLimiters.set(cacheKey, limiter);
+    return limiter;
+  } catch {
+    // If the package or network is unavailable, never block requests — fall back.
+    upstashUnavailable = true;
+    return null;
+  }
+}
+
+/** Derive a stable client identifier from a request (user id preferred, else IP). */
 export function clientKey(req: NextRequest, userId?: string | null): string {
   if (userId) return `u:${userId}`;
   const fwd = req.headers.get("x-forwarded-for");
@@ -56,19 +104,8 @@ export function clientKey(req: NextRequest, userId?: string | null): string {
   return `ip:${ip}`;
 }
 
-/**
- * Convenience: enforce a limit and return a 429 response if exceeded,
- * otherwise null. Adds standard RateLimit headers.
- */
-export function enforceRateLimit(
-  req: NextRequest,
-  opts: { scope: string; limit: number; windowMs: number; userId?: string | null }
-): NextResponse | null {
-  const key = `${opts.scope}:${clientKey(req, opts.userId)}`;
-  const result = rateLimit(key, opts.limit, opts.windowMs);
-  if (result.ok) return null;
-
-  const retryAfter = Math.ceil((result.resetAt - Date.now()) / 1000);
+function tooMany(result: RateLimitResult): NextResponse {
+  const retryAfter = Math.max(1, Math.ceil((result.resetAt - Date.now()) / 1000));
   return NextResponse.json(
     { error: "Too many requests. Please slow down." },
     {
@@ -81,4 +118,26 @@ export function enforceRateLimit(
       },
     }
   );
+}
+
+/**
+ * Enforce a limit and return a 429 response if exceeded, otherwise null.
+ * Uses Upstash when configured, in-memory otherwise.
+ */
+export async function enforceRateLimit(
+  req: NextRequest,
+  opts: { scope: string; limit: number; windowMs: number; userId?: string | null }
+): Promise<NextResponse | null> {
+  const id = clientKey(req, opts.userId);
+
+  const upstash = await getUpstashLimiter(opts.scope, opts.limit, opts.windowMs);
+  if (upstash) {
+    const r = await upstash.limit(id);
+    if (r.success) return null;
+    return tooMany({ ok: false, remaining: r.remaining, resetAt: r.reset, limit: r.limit });
+  }
+
+  const result = rateLimit(`${opts.scope}:${id}`, opts.limit, opts.windowMs);
+  if (result.ok) return null;
+  return tooMany(result);
 }

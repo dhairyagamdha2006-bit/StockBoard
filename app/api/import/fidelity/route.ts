@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const limited = enforceRateLimit(req, {
+  const limited = await enforceRateLimit(req, {
     scope: "import-fidelity",
     limit: 20,
     windowMs: 60_000,

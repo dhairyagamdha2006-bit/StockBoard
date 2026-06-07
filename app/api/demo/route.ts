@@ -1,10 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { seedDemoData, clearDemoData } from "@/lib/demo/seed";
+import { seedDemoData, clearDemoData, isDemoActive } from "@/lib/demo/seed";
 import { enforceRateLimit } from "@/lib/utils/rateLimit";
 
 export const dynamic = "force-dynamic";
+
+/** Reports whether demo data is currently loaded for the user. */
+export async function GET(_req: NextRequest) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const active = await isDemoActive(supabase as unknown as SupabaseClient, user.id);
+  return NextResponse.json({ active });
+}
 
 /** Load demo holdings so the dashboard can be explored without a real broker. */
 export async function POST(req: NextRequest) {
@@ -14,7 +26,7 @@ export async function POST(req: NextRequest) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const limited = enforceRateLimit(req, {
+  const limited = await enforceRateLimit(req, {
     scope: "demo",
     limit: 10,
     windowMs: 60_000,
@@ -24,8 +36,8 @@ export async function POST(req: NextRequest) {
 
   const serviceClient = (await createServiceClient()) as unknown as SupabaseClient;
   try {
-    const { holdings } = await seedDemoData(serviceClient, user.id);
-    return NextResponse.json({ success: true, holdings });
+    const { holdings, skipped } = await seedDemoData(serviceClient, user.id);
+    return NextResponse.json({ success: true, holdings, skipped });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to seed demo data";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -40,7 +52,7 @@ export async function DELETE(req: NextRequest) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const limited = enforceRateLimit(req, {
+  const limited = await enforceRateLimit(req, {
     scope: "demo",
     limit: 10,
     windowMs: 60_000,

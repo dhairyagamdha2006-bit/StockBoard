@@ -1,0 +1,49 @@
+# ACTIVATION: move this file to `.github/workflows/ci.yml` to enable CI.
+# It lives at the repo root only because the push token lacked the `workflow`
+# scope. Easiest path: in the GitHub web UI, Add file → Create new file named
+# `.github/workflows/ci.yml` and paste this content (the web editor is allowed
+# to create workflows). Or re-push with a token that has the `workflow` scope.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    # Dummy-but-valid env so the build/middleware env validation passes without
+    # real secrets. No real broker credentials are ever required in CI.
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci_anon_key_value_for_build_only_0123456789
+      SUPABASE_SERVICE_ROLE_KEY: ci_service_role_key_for_build_only_0123456789
+      ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
+      CRON_SECRET: ci_cron_secret_value_0123456789abcdef
+      ALPACA_API_KEY: ci_alpaca_key
+      ALPACA_SECRET_KEY: ci_alpaca_secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build

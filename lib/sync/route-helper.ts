@@ -24,7 +24,7 @@ export async function handleBrokerSync(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const limited = enforceRateLimit(req, {
+  const limited = await enforceRateLimit(req, {
     scope: `sync-${broker}`,
     limit: 12,
     windowMs: 60_000,

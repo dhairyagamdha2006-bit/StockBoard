@@ -36,7 +36,6 @@ export function parseFidelityCSV(
     const lastPrice = parseFloat((row["Last Price"] ?? "0").replace(/[$,]/g, ""));
     const currentValue = parseFloat((row["Current Value"] ?? "0").replace(/[$,]/g, ""));
     const dayChange = parseFloat((row["Today's Gain/Loss Dollar"] ?? "0").replace(/[$,]/g, ""));
-    const totalGainLoss = parseFloat((row["Total Gain/Loss Dollar"] ?? "0").replace(/[$,]/g, ""));
 
     holdings.push({
       ticker: symbol,
