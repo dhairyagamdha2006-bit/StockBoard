@@ -41,9 +41,10 @@ export function useLivePrices(tickers: string[]) {
 
     fetchPrices(tickers);
 
-    // Subscribe to Supabase Realtime for price cache changes
+    // Subscribe to Supabase Realtime for price cache changes.
+    // Unique channel name per mount avoids topic collisions on the shared client.
     const channel = supabase
-      .channel("price-updates")
+      .channel(`price-updates-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "price_cache" },

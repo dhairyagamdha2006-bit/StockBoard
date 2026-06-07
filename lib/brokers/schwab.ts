@@ -1,40 +1,50 @@
 import type { NormalizedHolding } from "./robinhood";
+import { getBrokerOAuthEnv } from "@/lib/env";
 
 const SCHWAB_AUTH_URL = "https://api.schwabapi.com/v1/oauth/authorize";
 const SCHWAB_TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token";
 const SCHWAB_API_BASE = "https://api.schwabapi.com/trader/v1";
 
-export function getSchwabAuthUrl(): string {
+/** Build the Schwab authorize URL. `state` is required for CSRF protection. */
+export function getSchwabAuthUrl(state: string): string {
+  const { clientId, redirectUri } = getBrokerOAuthEnv("schwab");
   const params = new URLSearchParams({
     response_type: "code",
-    client_id: process.env.SCHWAB_CLIENT_ID!,
-    redirect_uri: process.env.SCHWAB_REDIRECT_URI!,
+    client_id: clientId,
+    redirect_uri: redirectUri,
     scope: "readonly",
+    state,
   });
   return `${SCHWAB_AUTH_URL}?${params.toString()}`;
+}
+
+function basicAuthHeader(): string {
+  const { clientId, clientSecret } = getBrokerOAuthEnv("schwab");
+  return "Basic " + Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 }
 
 export async function exchangeSchwabCode(
   code: string
 ): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
-  const credentials = Buffer.from(
-    `${process.env.SCHWAB_CLIENT_ID}:${process.env.SCHWAB_CLIENT_SECRET}`
-  ).toString("base64");
+  const { redirectUri } = getBrokerOAuthEnv("schwab");
 
   const res = await fetch(SCHWAB_TOKEN_URL, {
     method: "POST",
     headers: {
-      Authorization: `Basic ${credentials}`,
+      Authorization: basicAuthHeader(),
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code,
-      redirect_uri: process.env.SCHWAB_REDIRECT_URI!,
+      redirect_uri: redirectUri,
     }),
   });
 
-  if (!res.ok) throw new Error(`Schwab token exchange failed: ${await res.text()}`);
+  if (!res.ok) {
+    // Never log/throw the response body — it can echo the auth code.
+    throw new Error(`Schwab token exchange failed (status ${res.status}).`);
+  }
   const data = await res.json();
   return {
     accessToken: data.access_token,
@@ -46,14 +56,10 @@ export async function exchangeSchwabCode(
 export async function refreshSchwabToken(
   refreshToken: string
 ): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
-  const credentials = Buffer.from(
-    `${process.env.SCHWAB_CLIENT_ID}:${process.env.SCHWAB_CLIENT_SECRET}`
-  ).toString("base64");
-
   const res = await fetch(SCHWAB_TOKEN_URL, {
     method: "POST",
     headers: {
-      Authorization: `Basic ${credentials}`,
+      Authorization: basicAuthHeader(),
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: new URLSearchParams({
@@ -62,7 +68,9 @@ export async function refreshSchwabToken(
     }),
   });
 
-  if (!res.ok) throw new Error(`Schwab token refresh failed: ${await res.text()}`);
+  if (!res.ok) {
+    throw new Error(`Schwab token refresh failed (status ${res.status}).`);
+  }
   const data = await res.json();
   return {
     accessToken: data.access_token,
@@ -76,7 +84,7 @@ export async function fetchSchwabHoldings(accessToken: string): Promise<Normaliz
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
-  if (!accountsRes.ok) throw new Error("Failed to fetch Schwab accounts");
+  if (!accountsRes.ok) throw new Error(`Failed to fetch Schwab accounts (status ${accountsRes.status}).`);
   const accounts = await accountsRes.json();
   const holdings: NormalizedHolding[] = [];
 
@@ -92,13 +100,14 @@ export async function fetchSchwabHoldings(accessToken: string): Promise<Normaliz
 
     for (const pos of positions) {
       const instr = pos.instrument ?? {};
+      const longQty = parseFloat(pos.longQuantity ?? pos.quantity ?? "0") || 0;
       holdings.push({
         ticker: instr.symbol ?? "",
         company_name: instr.description ?? instr.symbol,
-        shares: parseFloat(pos.longQuantity ?? pos.quantity ?? "0"),
-        average_cost: parseFloat(pos.averagePrice ?? "0"),
-        current_price: parseFloat(pos.marketValue ?? "0") / parseFloat(pos.longQuantity ?? "1"),
-        previous_close: parseFloat(pos.previousCloseValue ?? "0"),
+        shares: longQty,
+        average_cost: parseFloat(pos.averagePrice ?? "0") || 0,
+        current_price: longQty > 0 ? (parseFloat(pos.marketValue ?? "0") || 0) / longQty : 0,
+        previous_close: parseFloat(pos.previousCloseValue ?? "0") || 0,
         asset_type:
           instr.assetType === "ETF"
             ? "etf"

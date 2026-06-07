@@ -1,8 +1,12 @@
 export const dynamic = "force-dynamic";
 import { OAuthButton } from "@/components/Connect/OAuthButton";
+import { BrokerUnavailable } from "@/components/Connect/BrokerUnavailable";
+import { getBrokerAvailability } from "@/lib/brokers/availability";
 import Link from "next/link";
 
 export default function ConnectSchwabPage() {
+  const a = getBrokerAvailability("schwab");
+
   return (
     <div className="min-h-screen bg-[#fafafa] dark:bg-[#0a0a0f] flex items-center justify-center px-6">
       <div className="w-full max-w-sm">
@@ -14,15 +18,23 @@ export default function ConnectSchwabPage() {
           <p className="text-sm text-gray-400 mt-1">Authorize read-only access via Schwab&apos;s official API</p>
         </div>
 
-        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-black/[0.08] dark:border-white/[0.08] p-8 space-y-4">
-          <div className="text-xs text-gray-500 font-sans space-y-1.5">
-            <p>✓ Official Schwab Developer API (OAuth 2.0)</p>
-            <p>✓ Read-only scope — we cannot trade</p>
-            <p>✓ Token stored encrypted with AES-256</p>
-            <p>✓ Auto-refreshes before expiry</p>
+        {a.available ? (
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-black/[0.08] dark:border-white/[0.08] p-8 space-y-4">
+            <div className="text-xs text-gray-500 font-sans space-y-1.5">
+              <p>✓ Official Schwab Developer API (OAuth 2.0)</p>
+              <p>✓ Read-only scope — we cannot trade</p>
+              <p>✓ Token stored encrypted with AES-256-GCM</p>
+              <p>✓ Auto-refreshes before expiry</p>
+            </div>
+            <OAuthButton broker="schwab" label="Charles Schwab" color="#7c3aed" />
           </div>
-          <OAuthButton broker="schwab" label="Charles Schwab" color="#7c3aed" />
-        </div>
+        ) : (
+          <BrokerUnavailable
+            displayName={a.displayName}
+            reason={a.unavailableReason ?? a.summary}
+            requirements={a.requirements}
+          />
+        )}
 
         <p className="text-center text-sm text-gray-400 mt-4">
           <Link href="/dashboard" className="hover:text-gray-600 dark:hover:text-gray-200">← Back to dashboard</Link>

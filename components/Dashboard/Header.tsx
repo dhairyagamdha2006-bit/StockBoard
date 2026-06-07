@@ -68,11 +68,37 @@ export function Header() {
         <button
           onClick={handleSignOut}
           title="Sign out"
+          aria-label="Sign out"
           className="w-9 h-9 rounded-full bg-gradient-to-br from-[#4ade80] to-[#22d3ee] flex items-center justify-center text-white font-bold text-sm font-sans hover:opacity-80 transition-opacity"
         >
           S
         </button>
       </div>
+
+      {/* Mobile nav — horizontally scrollable */}
+      <nav
+        aria-label="Primary"
+        className="md:hidden border-t border-black/[0.06] dark:border-white/[0.06] px-3 py-2 flex items-center gap-1 overflow-x-auto"
+      >
+        {NAV_ITEMS.map((item) => {
+          const active = pathname === item.href;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-current={active ? "page" : undefined}
+              className={clsx(
+                "px-3 py-1.5 rounded-lg text-xs font-medium font-sans whitespace-nowrap transition-colors",
+                active
+                  ? "bg-[#4ade80]/10 text-[#4ade80]"
+                  : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800"
+              )}
+            >
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
     </header>
   );
 }

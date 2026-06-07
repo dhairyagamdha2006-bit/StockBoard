@@ -1,21 +1,20 @@
 import OAuth from "oauth";
 import type { NormalizedHolding } from "./robinhood";
+import { getBrokerOAuthEnv } from "@/lib/env";
 
-const ETRADE_BASE = "https://api.etrade.com";
-const isSandbox = process.env.NODE_ENV !== "production";
-
-const BASE_URL = isSandbox
-  ? "https://apisb.etrade.com"
-  : ETRADE_BASE;
+const ETRADE_PROD = "https://api.etrade.com";
+const ETRADE_SANDBOX = "https://apisb.etrade.com";
+const BASE_URL = process.env.NODE_ENV !== "production" ? ETRADE_SANDBOX : ETRADE_PROD;
 
 function getOAuth() {
+  const { clientId, clientSecret, redirectUri } = getBrokerOAuthEnv("etrade");
   return new OAuth.OAuth(
     `${BASE_URL}/oauth/request_token`,
     `${BASE_URL}/oauth/access_token`,
-    process.env.ETRADE_CONSUMER_KEY!,
-    process.env.ETRADE_CONSUMER_SECRET!,
+    clientId,
+    clientSecret,
     "1.0",
-    process.env.ETRADE_REDIRECT_URI!,
+    redirectUri,
     "HMAC-SHA1"
   );
 }
@@ -25,11 +24,12 @@ export async function getETradeRequestToken(): Promise<{
   oauthTokenSecret: string;
   authorizeUrl: string;
 }> {
+  const { clientId } = getBrokerOAuthEnv("etrade");
   const oauth = getOAuth();
   return new Promise((resolve, reject) => {
     oauth.getOAuthRequestToken((err, token, secret) => {
-      if (err) return reject(err);
-      const authorizeUrl = `https://us.etrade.com/e/t/etws/authorize?key=${process.env.ETRADE_CONSUMER_KEY}&token=${token}`;
+      if (err) return reject(new Error("E*TRADE request-token step failed."));
+      const authorizeUrl = `https://us.etrade.com/e/t/etws/authorize?key=${clientId}&token=${token}`;
       resolve({ oauthToken: token, oauthTokenSecret: secret, authorizeUrl });
     });
   });
@@ -43,7 +43,8 @@ export async function getETradeAccessToken(
   const oauth = getOAuth();
   return new Promise((resolve, reject) => {
     oauth.getOAuthAccessToken(requestToken, requestTokenSecret, verifier, (err, token, secret) => {
-      if (err) return reject(err);
+      // Never surface the raw OAuth error — it can include response bodies.
+      if (err) return reject(new Error("E*TRADE access-token exchange failed."));
       resolve({ accessToken: token, accessTokenSecret: secret });
     });
   });

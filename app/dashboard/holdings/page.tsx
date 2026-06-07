@@ -6,6 +6,7 @@ import { usePortfolioStats } from "@/hooks/usePortfolioStats";
 import { BROKER_CONFIGS } from "@/types";
 import type { BrokerName } from "@/types";
 import { formatCurrency, formatPercent, formatShares } from "@/lib/utils/formatters";
+import { holdingsToCsv, downloadCsv } from "@/lib/utils/csv";
 import { clsx } from "clsx";
 
 const BROKERS: BrokerName[] = ["robinhood", "fidelity", "etrade", "schwab"];
@@ -50,27 +51,20 @@ export default function HoldingsPage() {
   }
 
   function exportCSV() {
-    const header = "Ticker,Company,Broker,Shares,Avg Cost,Price,Value,P&L,P&L %";
-    const rows = filtered.map((h) =>
-      [
-        h.ticker,
-        h.company_name ?? "",
-        h.broker_accounts?.broker_name ?? "",
-        h.shares,
-        h.average_cost ?? 0,
-        h.current_price ?? 0,
-        h.market_value ?? 0,
-        h.total_gain_loss ?? 0,
-        h.total_gain_loss_pct ?? 0,
-      ].join(",")
+    const csv = holdingsToCsv(
+      filtered.map((h) => ({
+        ticker: h.ticker,
+        company: h.company_name ?? "",
+        broker: h.broker_accounts?.broker_name ?? "",
+        shares: h.shares,
+        averageCost: h.average_cost ?? 0,
+        price: h.current_price ?? 0,
+        value: h.market_value ?? 0,
+        gainLoss: h.total_gain_loss ?? 0,
+        gainLossPct: h.total_gain_loss_pct ?? 0,
+      }))
     );
-    const csv = [header, ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "stockboard-holdings.csv";
-    a.click();
+    downloadCsv("stockboard-holdings.csv", csv);
   }
 
   const SortIcon = ({ k }: { k: SortKey }) =>
@@ -197,6 +191,15 @@ export default function HoldingsPage() {
                       </tr>
                     );
                   })}
+              {!loading && filtered.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-5 py-12 text-center text-sm text-gray-400 font-sans">
+                    {holdings.length === 0
+                      ? "No holdings yet. Connect a broker, import a Fidelity CSV, or load demo data from the dashboard."
+                      : "No holdings match your filters."}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

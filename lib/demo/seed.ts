@@ -42,10 +42,31 @@ const DEMO_ACCOUNTS: DemoAccountSeed[] = [
 ];
 
 /** Insert demo broker accounts + holdings + a 30-day snapshot history. */
-export async function seedDemoData(supabase: SupabaseClient, userId: string): Promise<{ holdings: number }> {
+export async function seedDemoData(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<{ holdings: number; skipped: string[] }> {
   let totalHoldings = 0;
+  const skipped: string[] = [];
+
+  // Never clobber a REAL connection. Find brokers that already have a token.
+  const { data: existing } = await supabase
+    .from("broker_accounts")
+    .select("broker_name, access_token, refresh_token")
+    .eq("user_id", userId);
+  const realConnections = new Set(
+    (existing ?? [])
+      .filter((a) => a.access_token || a.refresh_token)
+      .map((a) => a.broker_name as string)
+  );
 
   for (const seed of DEMO_ACCOUNTS) {
+    if (realConnections.has(seed.broker)) {
+      // A genuine connected account exists for this broker — leave it alone.
+      skipped.push(seed.broker);
+      continue;
+    }
+
     const { data: account, error } = await supabase
       .from("broker_accounts")
       .upsert(
@@ -74,7 +95,7 @@ export async function seedDemoData(supabase: SupabaseClient, userId: string): Pr
   await seedSnapshotHistory(supabase, userId);
   await savePortfolioSnapshot(supabase, userId);
 
-  return { holdings: totalHoldings };
+  return { holdings: totalHoldings, skipped };
 }
 
 /** Deterministic 30-day value curve so the performance chart has demo history. */
@@ -105,17 +126,29 @@ async function seedSnapshotHistory(supabase: SupabaseClient, userId: string): Pr
   }
 }
 
-/** Remove all demo accounts (and cascade their holdings) for a user. */
-export async function clearDemoData(supabase: SupabaseClient, userId: string): Promise<void> {
+/** Returns the user's demo broker-account ids (token-less rows on demo brokers). */
+async function getDemoAccountIds(supabase: SupabaseClient, userId: string): Promise<string[]> {
   const brokers = DEMO_ACCOUNTS.map((a) => a.broker);
   const { data: accounts } = await supabase
     .from("broker_accounts")
-    .select("id")
+    .select("id, access_token, refresh_token")
     .eq("user_id", userId)
-    .in("broker_name", brokers)
-    .is("access_token", null);
+    .in("broker_name", brokers);
 
-  const ids = (accounts ?? []).map((a) => a.id);
+  return (accounts ?? [])
+    .filter((a) => !a.access_token && !a.refresh_token)
+    .map((a) => a.id as string);
+}
+
+/** True if the user currently has demo data loaded. */
+export async function isDemoActive(supabase: SupabaseClient, userId: string): Promise<boolean> {
+  const ids = await getDemoAccountIds(supabase, userId);
+  return ids.length > 0;
+}
+
+/** Remove all demo accounts (and cascade their holdings) for a user. */
+export async function clearDemoData(supabase: SupabaseClient, userId: string): Promise<void> {
+  const ids = await getDemoAccountIds(supabase, userId);
   if (ids.length > 0) {
     await supabase.from("holdings").delete().in("account_id", ids);
     await supabase.from("broker_accounts").delete().in("id", ids);

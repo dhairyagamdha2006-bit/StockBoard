@@ -4,6 +4,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { syncAccounts } from "@/lib/sync/engine";
 import type { BrokerAccount } from "@/types";
 import { enforceRateLimit } from "@/lib/utils/rateLimit";
+import { getCronSecret } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +23,16 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("Authorization");
-  const cronSecret = process.env.CRON_SECRET;
-  const isVercelCron = Boolean(cronSecret) && authHeader === `Bearer ${cronSecret}`;
+  // getCronSecret() throws if CRON_SECRET is unset/weak — but only when a cron
+  // request is actually being attempted (Authorization header present).
+  let isVercelCron = false;
+  if (authHeader) {
+    try {
+      isVercelCron = authHeader === `Bearer ${getCronSecret()}`;
+    } catch {
+      isVercelCron = false;
+    }
+  }
 
   let userId: string | null = null;
   if (!isVercelCron) {
@@ -37,7 +46,7 @@ export async function POST(req: NextRequest) {
     userId = user.id;
 
     // Rate-limit manual user-triggered full syncs (cron is exempt).
-    const limited = enforceRateLimit(req, {
+    const limited = await enforceRateLimit(req, {
       scope: "sync-all",
       limit: 6,
       windowMs: 60_000,

@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "StockBoard — Unified Portfolio Tracker",
-  description: "Aggregate your Robinhood, Fidelity, E*TRADE, and Charles Schwab holdings into one real-time dashboard.",
+  description: "Aggregate your Fidelity, E*TRADE, and Charles Schwab holdings into one auto-updating dashboard.",
   icons: {
     icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231a1a2e'/><text y='22' x='4' font-size='20'>📈</text></svg>",
   },

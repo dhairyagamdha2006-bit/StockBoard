@@ -51,6 +51,14 @@ export default function HistoryPage() {
         <p className="text-sm text-gray-400 mt-0.5">{filtered.length} transactions</p>
       </div>
 
+      {/* Honest disclosure: transaction sync is not yet implemented. */}
+      <div className="mb-5 rounded-xl border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-xs font-sans text-amber-800 dark:text-amber-300">
+        <strong>Read-only view.</strong> StockBoard does not yet import transaction
+        records from brokers — only current holdings are synced. This page shows any
+        transactions present in your database (e.g. seeded by future imports) and will
+        stay empty until transaction import is added.
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-5">
         <select
@@ -136,7 +144,8 @@ export default function HistoryPage() {
               {!loading && filtered.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-5 py-12 text-center text-sm text-gray-400 font-sans">
-                    No transactions found.
+                    No transactions to display. Transaction import isn&apos;t implemented yet —
+                    see the note above.
                   </td>
                 </tr>
               )}
