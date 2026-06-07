@@ -1,267 +1,168 @@
 # StockBoard
 
-[![CI](https://github.com/dhairyagamdha2006-bit/StockBoard/actions/workflows/ci.yml/badge.svg)](https://github.com/dhairyagamdha2006-bit/StockBoard/actions/workflows/ci.yml)
-![Next.js](https://img.shields.io/badge/Next.js-16-black)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)
-![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20RLS-3ECF8E)
-![Tests](https://img.shields.io/badge/tests-58%20passing-brightgreen)
+StockBoard is a portfolio tracker I built to solve a problem I kept running into: my investments were scattered across different brokerages, and I had no single place to see everything together. Instead of logging into multiple apps, I wanted one dashboard that pulls my holdings into a single view.
 
-**One dashboard for your brokerage holdings.** StockBoard aggregates positions
-from Fidelity (CSV), E\*TRADE, and Charles Schwab (official OAuth) into a single
-auto-updating portfolio view — with quote refresh, daily snapshots, allocation
-analytics, and a safe server-side sync engine.
+It connects to **Fidelity** (via CSV import), and **E\*TRADE** and **Charles Schwab** (through their official read-only OAuth APIs). It shows your holdings, portfolio value, allocation breakdown, daily snapshots, and refreshes prices automatically.
 
-> **Want to try it instantly?** Sign up, open the dashboard, and click **Load
-> Demo Data** — realistic sample holdings, no brokerage credentials required.
+> **Want to try it without connecting a real account?** Sign up, open the dashboard, and click **Load Demo Data**. It seeds realistic sample holdings so you can explore everything — no brokerage credentials needed.
 
 ---
 
-## Why this project is interesting (engineering)
+## What it does
 
-- **Honest, gated broker integrations.** A single source-of-truth support matrix
-  drives the UI and docs. Unofficial integrations (Robinhood) are clearly labeled
-  experimental and disabled by default; unconfigured OAuth brokers degrade to a
-  graceful "not available" state instead of crashing.
-- **Server-side, cookie-free sync engine.** Cron and manual syncs share one
-  engine that runs with the Supabase **service-role** client. It’s **failure-safe**
-  (uses upsert-then-delete-stale, so a broker outage never wipes your holdings) and
-  **counts only genuine successes**, recording every attempt to a `sync_logs` table.
-- **Security-first.** AES-256-GCM token encryption with **no fallback key**;
-  Zod-validated env that **fails loudly**; RLS that makes `price_cache`
-  read-only for users (service-role writes only); OAuth **state/CSRF** protection;
-  audit-safe logging that never prints tokens/codes; `server-only`-guarded
-  service-role client.
-- **Production-minded infra.** Formal SQL migrations with indexes, Upstash Redis
-  rate limiting (with in-memory dev fallback), and a CI pipeline running
-  type-check, lint, tests, and build.
-- **Real tests.** 58 unit/integration tests (Vitest) covering encryption, env
-  validation, CSV parse/export, the sync engine (success/failure/skip + counting),
-  holdings DB logic, rate limiting, and an HTTP route — plus Playwright E2E specs.
+- **Aggregates holdings** from multiple brokers into one dashboard.
+- **Auto-updating prices** from Alpaca Markets (refreshed every ~30s during market hours, plus instant pushes through Supabase Realtime).
+- **Daily portfolio snapshots** that power the performance chart (it shows an honest empty state until you have history — no fake data).
+- **Analytics**: allocation breakdown, top gainers/losers, and a holdings table with search, sorting, filtering, and CSV export.
+- **Demo mode** so anyone can explore the app instantly.
+- **Connect / sync / disconnect** flows with clear status for each account (connected, syncing, error/reconnect, disconnected).
 
 ---
 
-## Screenshots
+## Broker support (being upfront)
 
-Add images to `public/screenshots/` and they’ll render here.
+I didn't want to overstate what works, so here's the honest breakdown:
 
-| Dashboard | Holdings | Analytics |
+| Broker | How it connects | Status |
 | --- | --- | --- |
-| `public/screenshots/dashboard.png` | `public/screenshots/holdings.png` | `public/screenshots/analytics.png` |
+| **Fidelity** | CSV import (export Positions → upload) | Works out of the box, no setup needed |
+| **Charles Schwab** | Official OAuth 2.0 (read-only) | Implemented — needs an approved Schwab developer app |
+| **E\*TRADE** | Official OAuth 1.0a (read-only) | Implemented — needs a developer consumer key (sandbox works for testing) |
+| **Robinhood** | Unofficial private API | Experimental, off by default — Robinhood has no public API, so I don't recommend it for real accounts |
+
+Fidelity CSV import works for anyone right away. Schwab and E\*TRADE are fully built, but each broker requires you to register a developer app and get it approved before their OAuth will work with real accounts — that approval is on the broker's side, not something the app can skip. Robinhood is intentionally disabled by default and only meant for experimentation.
 
 ---
 
-## Broker support matrix (honest)
+## Tech stack
 
-| Broker | Integration | Status | API sync? | Notes |
-| --- | --- | --- | --- | --- |
-| **Fidelity** | CSV import | ✅ Works out of the box | No (manual CSV) | Export Positions → upload. No credentials needed. |
-| **Charles Schwab** | Official OAuth 2.0 (read-only) | ⚙️ Requires approval | Yes | Needs an approved Schwab developer app + HTTPS callback. |
-| **E\*TRADE** | Official OAuth 1.0a (read-only) | ⚙️ Requires approval | Yes | Needs a developer consumer key (sandbox works for testing). |
-| **Robinhood** | Unofficial private API | 🧪 Experimental, off by default | Yes (gated) | No public API. Username/password. **Not for real accounts.** Enable with `ENABLE_ROBINHOOD_EXPERIMENTAL=true`. |
-
-**Is real broker connection production-ready?** Fidelity CSV import is. Schwab and
-E\*TRADE are fully implemented but **require you to register and get a developer app
-approved by the broker** and provide credentials — that approval is outside this
-project’s control. Robinhood is intentionally experimental and disabled.
+- **Next.js 16** (App Router) + **TypeScript**
+- **Supabase** — Postgres, Auth, Row Level Security, and Realtime
+- **Alpaca Markets** for price data
+- **Recharts** for charts, **Tailwind CSS** for styling
+- **Vitest** for tests, **Playwright** for end-to-end tests
+- Deployed on **Vercel** (with a daily cron job for background syncing)
 
 ---
 
-## Architecture
+## How it's built
 
 ```
-Next.js 16 (App Router)
-├── proxy.ts                     Edge middleware: session + route protection
-├── app/
-│   ├── page.tsx                 Landing
-│   ├── login / signup           Supabase Auth
-│   ├── dashboard/               Holdings, analytics, history, connected accounts
-│   ├── connect/<broker>/        Connect flows + OAuth callbacks (graceful states)
-│   └── api/
-│       ├── connect/<broker>     Start/complete a connection (OAuth state/CSRF)
-│       ├── sync/<broker>        Manual per-broker sync (user-auth → service-role)
-│       ├── sync/all             Cron + "sync everything" (service-role)
-│       ├── import/fidelity      CSV → holdings (safe replace)
-│       ├── prices               Alpaca quotes; service-role cache write
-│       ├── disconnect           Revoke a broker (wipe tokens + holdings)
-│       ├── demo                 Seed / clear / status of demo data
-│       └── brokers/status       Per-deployment broker availability
-├── lib/
-│   ├── env.ts                   Zod env validation (core + per-feature getters)
-│   ├── sync/{engine,holdings,route-helper}.ts   Failure-safe sync + sync_logs
-│   ├── brokers/                 Per-broker clients + support matrix + availability
-│   ├── prices/alpaca.ts         Alpaca REST snapshots
-│   ├── demo/seed.ts             Demo seeding (never overwrites real accounts)
-│   └── utils/                   encryption, validation, rateLimit, csv, calculations
-├── supabase/migrations/         Formal SQL migrations (schema, indexes, RLS, logs)
-├── tests/                       Vitest unit/integration tests
-└── e2e/                         Playwright E2E specs
+app/
+  page.tsx                 Landing page
+  login / signup           Supabase Auth
+  dashboard/               Holdings, analytics, history, connected accounts
+  connect/<broker>/        Connect flows + OAuth callbacks
+  api/
+    connect/<broker>       Start/finish a broker connection
+    sync/<broker>          Manual sync for one broker
+    sync/all               Cron + "sync everything"
+    import/fidelity        Parse a Fidelity CSV into holdings
+    prices                 Fetch quotes + update the price cache
+    disconnect             Remove a broker and its holdings
+    demo                   Load / clear demo data
+lib/
+  env.ts                   Validates environment variables on startup
+  sync/                    The sync engine (runs server-side)
+  brokers/                 Per-broker clients + the support matrix
+  prices/alpaca.ts         Alpaca price fetching
+  utils/                   encryption, validation, rate limiting, CSV helpers
+supabase/migrations/       SQL schema, indexes, and RLS policies
+tests/                     Unit + integration tests
+e2e/                       Playwright tests
 ```
 
-### How sync works
+A few decisions I'm happy with:
 
-1. **Auth.** Per-broker routes verify the signed-in user; `/api/sync/all` accepts
-   either a signed-in user (their accounts) or a Vercel Cron request with
-   `Authorization: Bearer ${CRON_SECRET}` (all accounts).
-2. **Execution** always runs server-side with the **service-role** client — never
-   by forwarding the caller’s cookie to sub-requests.
-3. **Failure-safe writes.** Holdings are mutated only *after* a successful broker
-   fetch, via upsert-then-delete-stale (needs `UNIQUE(account_id, ticker)`). A
-   broker failure leaves existing holdings intact and marks the account `error`.
-4. **Truthful counting + logs.** `syncAccounts` counts only `ok && !skipped`, and
-   every attempt is written to `sync_logs`.
+- **The sync runs server-side.** The cron job and manual "Sync Now" both use the same engine, which talks to the database with a service-role key on the server instead of relying on the user's browser session. It only counts a sync as successful if the broker actually returned data.
+- **Syncing is safe.** When it updates holdings it upserts the new positions first and then removes the stale ones, so a broker outage mid-sync never wipes your portfolio. Every attempt gets logged so you can see what happened.
+- **Tokens are encrypted.** Broker tokens are encrypted with AES-256-GCM before they're stored, and the app refuses to start if the encryption key isn't set properly.
+- **The database is locked down.** Row Level Security makes sure each user can only read their own data, and the price cache is read-only for users — only the server can write to it.
 
 ---
 
-## Data model
+## Getting it running locally
 
-Tables (see `supabase/migrations/0001_initial_schema.sql`): `broker_accounts`,
-`holdings`, `transactions`, `price_cache`, `portfolio_snapshots`, `sync_logs`.
+You'll need Node 18+, a Supabase project, and a (free) Alpaca API key.
 
-Indexes on `holdings(user_id)`, `holdings(account_id)`,
-`broker_accounts(user_id, broker_name)`, `transactions(user_id, transaction_date)`,
-`portfolio_snapshots(user_id, snapshot_date)`, `sync_logs(user_id, created_at)`.
+1. Install dependencies:
+   ```bash
+   npm install --legacy-peer-deps
+   ```
 
----
+2. Set up your environment variables:
+   ```bash
+   cp .env.example .env.local
+   ```
+   Then fill in the values (see the table below). You can generate the secrets with:
+   ```bash
+   openssl rand -hex 32   # for ENCRYPTION_KEY
+   openssl rand -hex 32   # for CRON_SECRET
+   ```
 
-## Security model
+3. Set up the database — in the Supabase SQL Editor, run:
+   - `supabase/migrations/0001_initial_schema.sql` (for a fresh project)
+   - `supabase/migrations/0002_hardening_upgrade.sql` (only if you have an older database)
 
-- **Token encryption.** Broker tokens are AES-256-GCM encrypted at rest
-  (`lib/utils/encryption.ts`), key derived from `ENCRYPTION_KEY` via scrypt.
-  **No fallback** — the module throws if the key is missing/weak/placeholder.
-- **Env validation.** `lib/env.ts` validates required env with Zod and fails
-  loudly. No placeholder Supabase values anywhere.
-- **RLS.** Every user table is scoped to `auth.uid()`. `price_cache` and
-  `sync_logs` are **read-only** for users; only service-role writes them.
-- **Service-role isolation.** `lib/supabase/server.ts` is marked `server-only`;
-  it can never be bundled into a client component.
-- **OAuth CSRF.** Schwab uses a random `state` bound to an httpOnly cookie;
-  E\*TRADE binds the OAuth 1.0a request-token secret to an httpOnly cookie.
-- **Audit-safe logging.** Broker error bodies, tokens, auth codes, and refresh
-  tokens are never logged.
-- **Rate limiting.** Per-user/IP limits on connect, sync, import, prices, demo,
-  and disconnect routes (Upstash Redis in prod, in-memory in dev).
-
----
-
-## Demo mode
-
-Click **Load Demo Data** on the dashboard to seed sample holdings across two
-demo broker accounts plus 30 days of portfolio snapshots. Demo accounts carry
-no tokens, so the sync engine never touches them, and seeding **never overwrites
-a real connected account**. A banner shows while demo data is active; **Clear
-Demo Data** removes it.
-
----
-
-## Local setup
-
-Prerequisites: Node 18+, a Supabase project, an Alpaca key (free).
-
-```bash
-npm install --legacy-peer-deps
-cp .env.example .env.local          # fill in real values
-openssl rand -hex 32                # ENCRYPTION_KEY
-openssl rand -hex 32                # CRON_SECRET
-```
-
-Apply the database schema in the Supabase SQL Editor:
-
-- **Fresh project:** run `supabase/migrations/0001_initial_schema.sql`.
-- **Existing/older DB:** also run `supabase/migrations/0002_hardening_upgrade.sql`.
-
-Run it:
-
-```bash
-npm run dev          # http://localhost:3000
-npm run typecheck    # tsc --noEmit
-npm run lint         # eslint
-npm test             # vitest (58 tests)
-npm run build        # production build
-```
+4. Start it:
+   ```bash
+   npm run dev          # http://localhost:3000
+   npm run typecheck    # type-check
+   npm run lint         # lint
+   npm test             # run the test suite
+   npm run build        # production build
+   ```
 
 ---
 
 ## Environment variables
 
-| Variable | Required | Scope | Description |
-| --- | --- | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | public | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | public | Supabase anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | **server** | Service-role key — bypasses RLS, never expose |
-| `ENCRYPTION_KEY` | ✅ | server | ≥16-char secret for AES-256-GCM token encryption |
-| `CRON_SECRET` | ✅ (prod) | server | Bearer token Vercel Cron uses to call `/api/sync/all` |
-| `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | ✅ | server | Alpaca market-data credentials |
-| `ETRADE_CONSUMER_KEY` / `_SECRET` / `ETRADE_REDIRECT_URI` | optional | server | E\*TRADE OAuth 1.0a |
-| `SCHWAB_CLIENT_ID` / `_SECRET` / `SCHWAB_REDIRECT_URI` | optional | server | Schwab OAuth 2.0 |
-| `ENABLE_ROBINHOOD_EXPERIMENTAL` | optional | server | `true` to enable the experimental Robinhood integration |
-| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | optional | server | Distributed rate limiting (falls back to in-memory) |
+| Variable | Required | Description |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Yes | Your Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase anon (public) key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Service-role key (server-only — never expose this) |
+| `ENCRYPTION_KEY` | Yes | Secret used to encrypt broker tokens (`openssl rand -hex 32`) |
+| `CRON_SECRET` | Yes (prod) | Protects the cron sync endpoint |
+| `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | Yes | Alpaca market-data credentials |
+| `SCHWAB_CLIENT_ID` / `SCHWAB_CLIENT_SECRET` / `SCHWAB_REDIRECT_URI` | Optional | Schwab OAuth |
+| `ETRADE_CONSUMER_KEY` / `ETRADE_CONSUMER_SECRET` / `ETRADE_REDIRECT_URI` | Optional | E\*TRADE OAuth |
+| `ENABLE_ROBINHOOD_EXPERIMENTAL` | Optional | Set to `true` to enable the experimental Robinhood integration |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Optional | Distributed rate limiting (falls back to in-memory if unset) |
 
 ---
 
-## Vercel deployment
+## Deploying to Vercel
 
-1. Import the repo into Vercel; add every variable above as a project env var.
-2. Install command: `npm install --legacy-peer-deps`.
-3. `vercel.json` declares the daily cron:
-
+1. Import the repo into Vercel and add all the environment variables above.
+2. Set the install command to `npm install --legacy-peer-deps`.
+3. The `vercel.json` file already sets up a daily cron job that hits `/api/sync/all` to refresh everyone's holdings:
    ```json
    { "crons": [{ "path": "/api/sync/all", "schedule": "0 0 * * *" }] }
    ```
-
-   Vercel attaches `Authorization: Bearer ${CRON_SECRET}`, which `/api/sync/all`
-   verifies before running an all-accounts service-role sync.
-4. For Schwab/E\*TRADE, register the production callback URLs with the brokers.
+4. If you're using Schwab or E\*TRADE, register your production callback URLs with them.
 
 ---
 
 ## Testing
 
 ```bash
-npm test            # unit + integration (Vitest)
-npm run test:e2e    # Playwright E2E (needs: npm run build && npx playwright install)
+npm test            # unit + integration tests
+npm run test:e2e    # Playwright (run: npm run build && npx playwright install first)
 ```
 
-Unit/integration coverage: env validation, encryption, validation helpers,
-portfolio calculations, CSV parse + export, rate limiting, `computeHoldingRows`,
-`replaceAccountHoldings`, sync-engine success/failure/skip + success counting,
-and the `/api/prices` route. E2E covers public pages and auth redirects;
-authenticated flows (demo/import/disconnect) are scaffolded and need a seeded
-test user.
+The tests cover the encryption, environment validation, CSV parsing and export, the sync engine (including failure and skip cases), the holdings logic, rate limiting, and an API route. The Playwright tests cover the public pages and auth redirects.
 
 ---
 
-## Production caveats
+## Things I'd improve next
 
-- **Broker approval is on you.** Schwab and E\*TRADE require approved developer
-  apps and credentials before their OAuth flows will work with real accounts.
-- **Robinhood is experimental.** It relies on an unofficial endpoint and is
-  disabled by default. Do not use it with a real-money account.
-- **Real-money security.** This is a portfolio/demo project. Before handling real
-  users’ live accounts you’d want a formal security review, secrets management
-  (e.g. a KMS), token rotation policies, and monitoring/alerting.
-- **Prices** come from Alpaca’s IEX feed and may differ slightly from your
-  broker’s marks; the dashboard refreshes every ~30s during market hours.
-
-## Known limitations
-
-- Transaction history is a **read-only view** — transaction import from brokers
-  is not implemented, so it stays empty until added.
-- The in-memory rate limiter is per-instance; use Upstash for multi-instance.
-- Playwright authenticated E2E needs a seeded test user (not included).
+- **Transaction history** is currently a read-only view — I haven't built importing transactions from brokers yet, so it stays empty for now.
+- The built-in rate limiter is in-memory; for a real multi-instance deployment I'd wire up the Upstash Redis option.
+- Adding more end-to-end tests for the logged-in flows (importing a CSV, disconnecting, etc.) with a seeded test user.
 
 ---
 
-## Résumé bullets
+## A note on security
 
-- Built a full-stack multi-broker portfolio tracker (Next.js 16, TypeScript,
-  Supabase Postgres + Auth + RLS + Realtime) with a failure-safe, cookie-free
-  server-side sync engine and truthful success accounting.
-- Hardened for production: AES-256-GCM token encryption with no fallback,
-  Zod env validation, RLS least-privilege (service-role-only cache writes),
-  OAuth CSRF protection, audit-safe logging, and Upstash-backed rate limiting.
-- Authored formal SQL migrations with indexes and a `sync_logs` audit table; set
-  up CI (type-check, lint, 58 tests, build) and Playwright E2E.
-
----
-
-Built with Next.js · TypeScript · Supabase · Alpaca Markets · Recharts · Tailwind · Vitest · Playwright.
+This started as a personal/learning project. The fundamentals are in place — encrypted tokens, row-level security, validated environment, rate limiting, and read-only broker access — but before trusting it with real money and real users, it would need a proper security review, managed secret storage, and monitoring. I built it to learn how to do these things right, and I tried to be honest about where it stands.
