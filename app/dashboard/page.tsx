@@ -29,7 +29,7 @@ function SyncIndicator({ lastUpdate }: { lastUpdate: Date | null }) {
         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#4ade80] opacity-75" />
         <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#4ade80]" />
       </span>
-      Live · {lastUpdate ? (elapsed === 0 ? "just now" : `${elapsed}s ago`) : "connecting…"}
+      Auto-updating · {lastUpdate ? (elapsed === 0 ? "just now" : `updated ${elapsed}s ago`) : "connecting…"}
     </div>
   );
 }

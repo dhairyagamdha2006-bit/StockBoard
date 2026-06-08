@@ -30,7 +30,7 @@ export function BrokerBreakdown({ brokers }: BrokerBreakdownProps) {
                 style={{ backgroundColor: cfg.dotColor }}
               />
               <span className="flex-1 text-sm font-sans text-[#111] dark:text-white">{cfg.displayName}</span>
-              {item.isConnected && <Badge variant="live">live</Badge>}
+              {item.isConnected && <Badge variant="live">active</Badge>}
               <span className="font-mono text-sm text-[#111] dark:text-white">
                 {item.isConnected ? formatCurrency(item.value) : "—"}
               </span>
