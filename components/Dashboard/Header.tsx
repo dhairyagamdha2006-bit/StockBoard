@@ -9,8 +9,10 @@ import { useRouter } from "next/navigation";
 const NAV_ITEMS = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "Holdings", href: "/dashboard/holdings" },
+  { label: "Market", href: "/dashboard/market" },
   { label: "Analytics", href: "/dashboard/analytics" },
   { label: "History", href: "/dashboard/history" },
+  { label: "Sync Logs", href: "/dashboard/sync-logs" },
 ];
 
 export function Header() {
