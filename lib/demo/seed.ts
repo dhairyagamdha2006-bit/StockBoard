@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { BrokerName } from "@/types";
-import { computeHoldingRows, savePortfolioSnapshot } from "@/lib/sync/holdings";
+import { computeHoldingRows } from "@/lib/sync/holdings";
 import type { NormalizedHolding } from "@/lib/brokers/robinhood";
 
 /**
@@ -49,14 +49,16 @@ export async function seedDemoData(
   let totalHoldings = 0;
   const skipped: string[] = [];
 
-  // Never clobber a REAL connection. Find brokers that already have a token.
+  // Never clobber a REAL connection. A broker is "real" if it has OAuth tokens
+  // OR is a CSV import (token-less but real, persisted user data). Demo seeding
+  // must skip those so it can't overwrite a user's imported holdings.
   const { data: existing } = await supabase
     .from("broker_accounts")
-    .select("broker_name, access_token, refresh_token")
+    .select("broker_name, access_token, refresh_token, connection_type")
     .eq("user_id", userId);
   const realConnections = new Set(
     (existing ?? [])
-      .filter((a) => a.access_token || a.refresh_token)
+      .filter((a) => a.access_token || a.refresh_token || a.connection_type === "csv")
       .map((a) => a.broker_name as string)
   );
 
@@ -78,6 +80,9 @@ export async function seedDemoData(
           refresh_token: null,
           connection_type: seed.connectionType,
           status: "active",
+          // Explicit demo marker. This is the ONLY thing demo cleanup keys off —
+          // a real CSV import (also token-less) is never mistaken for demo data.
+          is_demo: true,
           last_synced_at: new Date().toISOString(),
         },
         { onConflict: "user_id,broker_name" }
@@ -93,7 +98,6 @@ export async function seedDemoData(
   }
 
   await seedSnapshotHistory(supabase, userId);
-  await savePortfolioSnapshot(supabase, userId);
 
   return { holdings: totalHoldings, skipped };
 }
@@ -106,7 +110,7 @@ async function seedSnapshotHistory(supabase: SupabaseClient, userId: string): Pr
   const invested = allHoldings.reduce((s, h) => s + h.shares * h.average_cost, 0);
 
   const rows = [];
-  for (let i = 30; i >= 1; i--) {
+  for (let i = 30; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     // Smooth deterministic curve from invested → current value (no Math.random).
@@ -118,6 +122,7 @@ async function seedSnapshotHistory(supabase: SupabaseClient, userId: string): Pr
       total_value: Math.round(value * 100) / 100,
       total_gain_loss: Math.round((value - invested) * 100) / 100,
       snapshot_date: d.toISOString().split("T")[0],
+      is_demo: true, // so clearDemoData can remove exactly these rows
     });
   }
 
@@ -126,17 +131,40 @@ async function seedSnapshotHistory(supabase: SupabaseClient, userId: string): Pr
   }
 }
 
-/** Returns the user's demo broker-account ids (token-less rows on demo brokers). */
+/**
+ * Returns the user's demo broker-account ids.
+ *
+ * Demo accounts are identified by the explicit `is_demo` flag set at seed time.
+ * We deliberately do NOT key off "token-less" anymore: a real CSV import is also
+ * token-less, and the old heuristic would wrongly classify (and then DELETE) a
+ * CSV-imported Robinhood/Schwab account on demo-clear.
+ *
+ * Back-compat: if the `is_demo` column doesn't exist yet (migration not applied),
+ * we fall back to the old heuristic but EXCLUDE `connection_type = 'csv'` so CSV
+ * imports are never wiped.
+ */
 async function getDemoAccountIds(supabase: SupabaseClient, userId: string): Promise<string[]> {
   const brokers = DEMO_ACCOUNTS.map((a) => a.broker);
+
+  const withFlag = await supabase
+    .from("broker_accounts")
+    .select("id, is_demo")
+    .eq("user_id", userId)
+    .eq("is_demo", true);
+
+  if (!withFlag.error) {
+    return (withFlag.data ?? []).map((a) => a.id as string);
+  }
+
+  // Older DB without the is_demo column — safe fallback that never touches CSV.
   const { data: accounts } = await supabase
     .from("broker_accounts")
-    .select("id, access_token, refresh_token")
+    .select("id, access_token, refresh_token, connection_type")
     .eq("user_id", userId)
     .in("broker_name", brokers);
 
   return (accounts ?? [])
-    .filter((a) => !a.access_token && !a.refresh_token)
+    .filter((a) => !a.access_token && !a.refresh_token && a.connection_type !== "csv")
     .map((a) => a.id as string);
 }
 
@@ -146,11 +174,22 @@ export async function isDemoActive(supabase: SupabaseClient, userId: string): Pr
   return ids.length > 0;
 }
 
-/** Remove all demo accounts (and cascade their holdings) for a user. */
+/**
+ * Remove all demo accounts (and cascade their holdings) for a user, plus the
+ * demo-seeded snapshot history so it can't linger as the user's "real" chart.
+ * Real CSV/OAuth accounts and real snapshots are left untouched.
+ */
 export async function clearDemoData(supabase: SupabaseClient, userId: string): Promise<void> {
   const ids = await getDemoAccountIds(supabase, userId);
   if (ids.length > 0) {
     await supabase.from("holdings").delete().in("account_id", ids);
     await supabase.from("broker_accounts").delete().in("id", ids);
+  }
+
+  // Remove demo snapshots (best-effort; column may be absent on older DBs).
+  try {
+    await supabase.from("portfolio_snapshots").delete().eq("user_id", userId).eq("is_demo", true);
+  } catch {
+    /* older DB without is_demo on snapshots — nothing to clean */
   }
 }

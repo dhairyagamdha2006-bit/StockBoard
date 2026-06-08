@@ -134,6 +134,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ broker: st
           access_token: null,
           refresh_token: null,
           token_expires_at: null,
+          // Explicitly NOT demo — a CSV import is real, persisted user data and
+          // must survive "Clear demo data" and never be treated as demo.
+          is_demo: false,
           last_synced_at: new Date().toISOString(),
         },
         { onConflict: "user_id,broker_name" }

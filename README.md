@@ -16,7 +16,8 @@ The thing I care about most here is that it actually works for a new user **with
 - **Optional OAuth** for Schwab and E\*TRADE when you have an approved developer app.
 - **Market explorer** — search any stock, see a quote, and open a detail page with an interactive price chart (1D / 1W / 1M / 3M / 1Y).
 - **Watchlist** — track symbols you don't own yet, with live-ish quotes.
-- **Analytics** — allocation breakdown, top gainers/losers, and a performance chart built from real daily snapshots (honest empty state until history exists).
+- **Performance chart** — the dashboard chart shows how your **current holdings** would have moved over 1W / 1M / 3M / 1Y, computed from real historical market prices (Alpaca). It's "current holdings valued over time," not a reconstructed account balance — stated plainly in the UI — and it updates correctly the moment you import a CSV.
+- **Analytics** — allocation breakdown and top gainers/losers, with honest empty states until you have holdings.
 - **Sync logs** — every sync/import attempt is recorded with status, message, and duration, so you can see exactly what happened and why.
 - **Demo mode** so anyone can explore the app immediately.
 StockBoard is a portfolio tracker I built to solve a problem I kept running into: my investments were scattered across different brokerages, and I had no single place to see everything together. Instead of logging into multiple apps, I wanted one dashboard that pulls my holdings into a single view.
@@ -136,7 +137,9 @@ openssl rand -hex 32              # CRON_SECRET
 Run the database migrations in the Supabase SQL Editor:
 
 - **Fresh project:** run `supabase/migrations/0001_initial_schema.sql`.
-- **Upgrading an older DB:** also run `0002_hardening_upgrade.sql`, `0003_sync_logs_columns.sql`, and `0004_watchlist.sql`.
+- **Upgrading an older DB:** also run `0002_hardening_upgrade.sql`, `0003_sync_logs_columns.sql`, `0004_watchlist.sql`, and `0005_demo_marker.sql`.
+
+> **`0005_demo_marker.sql` matters if you already have data:** it adds an explicit `is_demo` flag so **"Clear demo data" removes only demo rows and never your CSV imports.** Without it the app falls back to a safe heuristic that still protects CSV imports, but applying the migration is recommended.
 
 Then:
 
@@ -226,7 +229,7 @@ You'll need Node 18+, a Supabase project, and a (free) Alpaca API key.
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Service-role key (server-only — never expose) |
 | `ENCRYPTION_KEY` | Yes | Encrypts broker tokens (`openssl rand -hex 32`) |
 | `CRON_SECRET` | Yes (prod) | Protects the cron sync endpoint |
-| `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | Yes | Alpaca market data (quotes, charts, search) |
+| `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | Yes | Alpaca market data (quotes, charts, performance history, symbol search). Without it, symbol search still works via a built-in popular-symbol fallback, but live quotes, the stock charts, and the dashboard performance chart show an honest "unavailable" state instead of fake data. **Set real keys in both `.env.local` and Vercel.** |
 | `SCHWAB_CLIENT_ID` / `_SECRET` / `SCHWAB_REDIRECT_URI` | Optional | Schwab OAuth |
 | `ETRADE_CONSUMER_KEY` / `_SECRET` / `ETRADE_REDIRECT_URI` | Optional | E\*TRADE OAuth |
 | `ENABLE_ROBINHOOD_EXPERIMENTAL` | Optional | `true` to enable the experimental Robinhood login |
