@@ -22,7 +22,11 @@ function CallbackHandler() {
       return;
     }
 
-    fetch(`/api/connect/etrade?action=callback&oauth_token=${oauthToken}&oauth_verifier=${verifier}`)
+    // Callback query params MUST be encoded — E*TRADE's oauth_token/oauth_verifier
+    // contain characters (=, +, /) that would corrupt the query string otherwise.
+    fetch(
+      `/api/connect/etrade?action=callback&oauth_token=${encodeURIComponent(oauthToken)}&oauth_verifier=${encodeURIComponent(verifier)}`
+    )
       .then((r) => r.json())
       .then((data) => {
         if (data.success) {

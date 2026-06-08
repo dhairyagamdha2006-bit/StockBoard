@@ -31,8 +31,9 @@ export function useLivePrices(tickers: string[]) {
         return next;
       });
       setLastUpdate(new Date());
-    } catch (e) {
-      console.error("Price fetch error:", e);
+    } catch {
+      // Network hiccup — polling will retry. Don't log the raw error object.
+      console.warn("Price fetch failed; will retry on next poll.");
     }
   }, []);
 

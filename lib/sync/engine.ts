@@ -17,25 +17,37 @@ export interface SyncResult {
   skipped?: boolean;
 }
 
+/** A user-friendly one-liner for a sync result (never contains tokens/secrets). */
+function summarize(result: SyncResult): string {
+  if (result.skipped) return result.error ?? "Skipped";
+  if (result.ok) return `Synced ${result.count ?? 0} holdings`;
+  return result.error ?? "Sync failed";
+}
+
 /** Insert a sync_logs row. Best-effort — never throws (logging must not break sync). */
 async function recordSyncLog(
   supabase: SupabaseClient,
   account: BrokerAccount,
-  result: SyncResult
+  result: SyncResult,
+  startedAt: string
 ): Promise<void> {
   const status = result.skipped ? "skipped" : result.ok ? "success" : "failed";
+  const message = summarize(result);
   try {
     await supabase.from("sync_logs").insert({
       user_id: account.user_id,
       account_id: account.id,
       broker_name: account.broker_name,
       status,
+      message,
       holdings_synced: result.count ?? 0,
       holdings_removed: result.removed ?? 0,
-      error_message: result.error ?? null,
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      error_message: result.ok ? null : result.error ?? null,
     });
   } catch {
-    // sync_logs table may not exist yet on older DBs — ignore.
+    // sync_logs table may not have the new columns on an older DB — ignore.
   }
 }
 
@@ -54,8 +66,9 @@ export async function syncBrokerAccount(
   supabase: SupabaseClient,
   account: BrokerAccount
 ): Promise<SyncResult> {
+  const startedAt = new Date().toISOString();
   const result = await runSync(supabase, account);
-  await recordSyncLog(supabase, account, result);
+  await recordSyncLog(supabase, account, result, startedAt);
   return result;
 }
 

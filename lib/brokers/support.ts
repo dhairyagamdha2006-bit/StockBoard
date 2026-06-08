@@ -1,86 +1,78 @@
 import type { BrokerName } from "@/types";
 
 /**
- * Honest broker support matrix.
+ * Honest broker support matrix — the single source of truth used by the UI,
+ * the connect pages, and the README.
  *
- * This is the single source of truth for what each integration actually is —
- * used by the UI, the connect pages, and the README. We do NOT claim a broker
- * "works in production" unless its flow is implemented; approval/credential
- * requirements are stated plainly.
+ * The reliable default for EVERY broker is CSV import (no approval needed).
+ * OAuth is an optional advanced upgrade for Schwab/E*TRADE when configured.
+ * Robinhood's unofficial username/password login stays experimental + off.
  */
 
-export type IntegrationKind =
-  | "oauth-official" // Official broker OAuth API
-  | "csv-import" // Manual CSV upload
-  | "experimental-unofficial"; // Reverse-engineered private API — risky
-
 export type SupportTier =
-  | "available" // Works out of the box once env is set
-  | "requires-approval" // Implemented, but needs broker developer approval/keys
-  | "experimental"; // Unofficial / off by default / not for real accounts
+  | "csv" // CSV import is the primary method
+  | "csv-plus-oauth" // CSV works now; OAuth optional when configured
+  | "csv-plus-experimental"; // CSV works now; unofficial login is experimental/off
 
 export interface BrokerSupport {
   broker: BrokerName;
   displayName: string;
-  kind: IntegrationKind;
   tier: SupportTier;
-  /** Honest one-line description of what this integration really is. */
+  /** Honest one-line description of how this broker connects. */
   summary: string;
-  /** Whether a server-side API pull of holdings is implemented. */
-  canApiSync: boolean;
-  /** What the operator must configure/obtain to enable it. */
-  requirements: string[];
+  /** CSV import is available for every broker. */
+  csvImport: true;
+  /** Whether an official OAuth API integration exists (optional, when configured). */
+  hasOAuth: boolean;
+  /** Whether an experimental unofficial login exists (off by default). */
+  hasExperimentalLogin: boolean;
+  /** Where to export the CSV from this broker. */
+  csvExportHint: string;
 }
 
 export const BROKER_SUPPORT: Record<BrokerName, BrokerSupport> = {
   fidelity: {
     broker: "fidelity",
     displayName: "Fidelity",
-    kind: "csv-import",
-    tier: "available",
-    summary: "Manual CSV import of your positions export. Fully working — no API approval needed.",
-    canApiSync: false,
-    requirements: ["No credentials required — just export Positions as CSV from Fidelity."],
+    tier: "csv",
+    summary: "Import your positions via CSV. Works out of the box — no credentials needed.",
+    csvImport: true,
+    hasOAuth: false,
+    hasExperimentalLogin: false,
+    csvExportHint: "Fidelity → Accounts & Trade → Portfolio → Positions → Download (CSV).",
   },
   schwab: {
     broker: "schwab",
     displayName: "Charles Schwab",
-    kind: "oauth-official",
-    tier: "requires-approval",
+    tier: "csv-plus-oauth",
     summary:
-      "Official Schwab Trader API (OAuth 2.0, read-only). Implemented, but requires an approved Schwab developer app.",
-    canApiSync: true,
-    requirements: [
-      "An approved Charles Schwab developer application",
-      "SCHWAB_CLIENT_ID, SCHWAB_CLIENT_SECRET, SCHWAB_REDIRECT_URI",
-      "An HTTPS callback URL registered with Schwab",
-    ],
+      "Import via CSV out of the box. Optional: connect Schwab's official read-only OAuth API if you have an approved developer app.",
+    csvImport: true,
+    hasOAuth: true,
+    hasExperimentalLogin: false,
+    csvExportHint: "Schwab → Accounts → Positions → Export (CSV).",
   },
   etrade: {
     broker: "etrade",
     displayName: "E*TRADE",
-    kind: "oauth-official",
-    tier: "requires-approval",
+    tier: "csv-plus-oauth",
     summary:
-      "Official E*TRADE API (OAuth 1.0a, read-only). Implemented with sandbox support; requires a developer consumer key.",
-    canApiSync: true,
-    requirements: [
-      "An E*TRADE developer consumer key/secret (sandbox keys work for testing)",
-      "ETRADE_CONSUMER_KEY, ETRADE_CONSUMER_SECRET, ETRADE_REDIRECT_URI",
-    ],
+      "Import via CSV out of the box. Optional: connect E*TRADE's official read-only OAuth API if you have developer keys.",
+    csvImport: true,
+    hasOAuth: true,
+    hasExperimentalLogin: false,
+    csvExportHint: "E*TRADE → Portfolios → Download (CSV).",
   },
   robinhood: {
     broker: "robinhood",
     displayName: "Robinhood",
-    kind: "experimental-unofficial",
-    tier: "experimental",
+    tier: "csv-plus-experimental",
     summary:
-      "EXPERIMENTAL: uses Robinhood's unofficial private API with username/password. Off by default. Not recommended for real accounts — Robinhood has no public API and this may break or risk your account.",
-    canApiSync: true,
-    requirements: [
-      "Set ENABLE_ROBINHOOD_EXPERIMENTAL=true to enable (you accept the risk)",
-      "Intended for demos/testing, not production use with real money",
-    ],
+      "Import via CSV (recommended). Robinhood has no public API; the unofficial username/password login is experimental and disabled by default — not recommended for real accounts.",
+    csvImport: true,
+    hasOAuth: false,
+    hasExperimentalLogin: true,
+    csvExportHint: "Use a Symbol, Shares, Average Cost, Price CSV (see the template on the import page).",
   },
 };
 

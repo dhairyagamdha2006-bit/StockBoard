@@ -1,5 +1,6 @@
 import type { AlpacaSnapshot } from "@/types";
 import { getAlpacaCreds } from "@/lib/env";
+import { logger } from "@/lib/utils/logger";
 
 /**
  * Alpaca market-data client (REST snapshots).
@@ -26,7 +27,7 @@ export async function getSnapshots(tickers: string[]): Promise<Map<string, Alpac
 
   if (!res.ok) {
     // Log status only — never the response body (avoids leaking any echoed creds).
-    console.error(`Alpaca snapshots request failed with status ${res.status}`);
+    logger.error("Alpaca snapshots request failed", { provider: "alpaca", status: res.status });
     return new Map();
   }
 
