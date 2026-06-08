@@ -38,14 +38,20 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 // Holdings DB writes are covered by holdings-db.test.ts — stub them here.
-vi.mock("@/lib/sync/holdings", () => ({
-  computeHoldingRows: (_u: string, _a: string, holdings: unknown[]) => holdings,
-  replaceAccountHoldings: async (_c: unknown, _a: string, rows: unknown[]) => ({
-    upserted: (rows as unknown[]).length,
-    removed: 0,
-  }),
-  savePortfolioSnapshot: async () => {},
-}));
+// Use importOriginal so deduplicateHoldings (a pure function added in the
+// duplicate-ticker fix) runs for real inside the route under test.
+vi.mock("@/lib/sync/holdings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/holdings")>();
+  return {
+    ...actual,
+    computeHoldingRows: (_u: string, _a: string, holdings: unknown[]) => holdings,
+    replaceAccountHoldings: async (_c: unknown, _a: string, rows: unknown[]) => ({
+      upserted: (rows as unknown[]).length,
+      removed: 0,
+    }),
+    savePortfolioSnapshot: async () => {},
+  };
+});
 
 import { POST } from "@/app/api/import/[broker]/route";
 
