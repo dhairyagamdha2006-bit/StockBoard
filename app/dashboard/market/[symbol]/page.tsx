@@ -4,12 +4,14 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { Star, ArrowLeft } from "lucide-react";
+import { Star, ArrowLeft, AlertTriangle } from "lucide-react";
 import { formatCurrency, formatPercent } from "@/lib/utils/formatters";
 import { clsx } from "clsx";
 
 type Range = "1D" | "1W" | "1M" | "3M" | "1Y";
 const RANGES: Range[] = ["1D", "1W", "1M", "3M", "1Y"];
+
+type Status = "loading" | "ok" | "notfound" | "ratelimited" | "unavailable" | "error";
 
 interface Quote {
   symbol: string;
@@ -27,6 +29,26 @@ interface Bar {
   c: number;
 }
 
+// Module-scope so it isn't recreated on every render. Works in every status
+// (including unavailable/not-found) so the user can always manage the watchlist.
+function WatchlistButton({ inWatch, onToggle }: { inWatch: boolean; onToggle: () => void }) {
+  return (
+    <button
+      onClick={onToggle}
+      aria-label={inWatch ? "Remove from watchlist" : "Add to watchlist"}
+      className={clsx(
+        "flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-sans font-medium border transition-colors",
+        inWatch
+          ? "border-[#facc15]/40 text-[#facc15] bg-[#facc15]/10"
+          : "border-black/[0.08] dark:border-white/[0.08] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+      )}
+    >
+      <Star className="w-3.5 h-3.5" fill={inWatch ? "currentColor" : "none"} />
+      {inWatch ? "Watching" : "Add to Watchlist"}
+    </button>
+  );
+}
+
 export default function StockDetailPage() {
   const params = useParams<{ symbol: string }>();
   const symbol = (params.symbol ?? "").toUpperCase();
@@ -34,31 +56,44 @@ export default function StockDetailPage() {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [bars, setBars] = useState<Bar[]>([]);
   const [range, setRange] = useState<Range>("1M");
-  const [status, setStatus] = useState<"loading" | "ok" | "notfound" | "ratelimited" | "error">("loading");
+  const [status, setStatus] = useState<Status>("loading");
   const [inWatch, setInWatch] = useState(false);
   const [barsLoading, setBarsLoading] = useState(false);
 
-  // Load quote + watchlist membership.
+  // Watchlist membership loads independently so the user can ALWAYS add/remove a
+  // symbol, even when market price data is unavailable.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const wRes = await fetch("/api/watchlist");
+        if (!active || !wRes.ok) return;
+        const wData = await wRes.json();
+        setInWatch((wData.items ?? []).some((it: { symbol: string }) => it.symbol === symbol));
+      } catch {
+        /* non-fatal */
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [symbol]);
+
+  // Load quote.
   useEffect(() => {
     let active = true;
     (async () => {
       setStatus("loading");
       try {
-        const [qRes, wRes] = await Promise.all([
-          fetch(`/api/market/quote?symbol=${encodeURIComponent(symbol)}`),
-          fetch("/api/watchlist"),
-        ]);
+        const qRes = await fetch(`/api/market/quote?symbol=${encodeURIComponent(symbol)}`);
         if (!active) return;
         if (qRes.status === 404) return setStatus("notfound");
         if (qRes.status === 429) return setStatus("ratelimited");
+        if (qRes.status === 503) return setStatus("unavailable");
         if (!qRes.ok) return setStatus("error");
         const qData = await qRes.json();
         setQuote(qData.quote);
         setStatus("ok");
-        if (wRes.ok) {
-          const wData = await wRes.json();
-          setInWatch((wData.items ?? []).some((it: { symbol: string }) => it.symbol === symbol));
-        }
       } catch {
         if (active) setStatus("error");
       }
@@ -98,7 +133,7 @@ export default function StockDetailPage() {
       await fetch("/api/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol, name: quote?.symbol ?? symbol }),
+        body: JSON.stringify({ symbol, name: symbol }),
       });
     }
   }
@@ -106,18 +141,28 @@ export default function StockDetailPage() {
   if (status === "loading") {
     return <div className="flex justify-center py-20"><div className="w-8 h-8 border-2 border-[#4ade80] border-t-transparent rounded-full animate-spin" /></div>;
   }
-  if (status === "notfound" || status === "error" || status === "ratelimited") {
+
+  // Graceful states: symbol still shown, watchlist still actionable, no fake data.
+  if (status === "notfound" || status === "error" || status === "ratelimited" || status === "unavailable") {
     const msg =
       status === "notfound"
         ? `No market data found for "${symbol}".`
         : status === "ratelimited"
           ? "You're requesting quotes too quickly. Please wait a moment."
-          : "Market data is temporarily unavailable.";
+          : status === "unavailable"
+            ? "Market price data is unavailable. Check Alpaca API keys."
+            : "Market data is temporarily unavailable.";
     return (
-      <div className="animate-fade-in">
-        <Link href="/dashboard/market" className="inline-flex items-center gap-1 text-sm text-gray-400 hover:text-gray-600 mb-6"><ArrowLeft className="w-4 h-4" /> Back to Market</Link>
+      <div className="animate-fade-in space-y-6">
+        <Link href="/dashboard/market" className="inline-flex items-center gap-1 text-sm text-gray-400 hover:text-gray-600"><ArrowLeft className="w-4 h-4" /> Back to Market</Link>
+        <div className="flex items-start justify-between">
+          <h1 className="text-2xl font-bold text-[#111] dark:text-white font-mono">{symbol}</h1>
+          <WatchlistButton inWatch={inWatch} onToggle={toggleWatch} />
+        </div>
         <div className="rounded-2xl border border-black/[0.08] dark:border-white/[0.08] p-12 text-center">
+          <AlertTriangle className="w-7 h-7 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
           <p className="text-sm font-sans text-gray-500 dark:text-gray-300">{msg}</p>
+          <p className="text-xs text-gray-400 font-sans mt-2">You can still add this symbol to your watchlist.</p>
         </div>
       </div>
     );
@@ -139,19 +184,7 @@ export default function StockDetailPage() {
             </span>
           </div>
         </div>
-        <button
-          onClick={toggleWatch}
-          aria-label={inWatch ? "Remove from watchlist" : "Add to watchlist"}
-          className={clsx(
-            "flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-sans font-medium border transition-colors",
-            inWatch
-              ? "border-[#facc15]/40 text-[#facc15] bg-[#facc15]/10"
-              : "border-black/[0.08] dark:border-white/[0.08] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-          )}
-        >
-          <Star className="w-3.5 h-3.5" fill={inWatch ? "currentColor" : "none"} />
-          {inWatch ? "Watching" : "Add to Watchlist"}
-        </button>
+        <WatchlistButton inWatch={inWatch} onToggle={toggleWatch} />
       </div>
 
       {/* OHLC stats */}

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getQuote } from "@/lib/prices/market";
 import { enforceRateLimit } from "@/lib/utils/rateLimit";
 import { isValidTicker } from "@/lib/utils/validation";
+import { isAlpacaConfigured } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
@@ -22,9 +23,26 @@ export async function GET(req: NextRequest) {
   }
   const symbol = symbolRaw.toUpperCase();
 
-  const quote = await getQuote(symbol);
-  if (!quote) {
-    return NextResponse.json({ error: "No market data available for this symbol." }, { status: 404 });
+  // Alpaca not configured → honest "unavailable" (503), distinct from a symbol
+  // that genuinely has no data (404). The UI shows different copy for each and
+  // never crashes.
+  if (!isAlpacaConfigured()) {
+    return NextResponse.json(
+      { error: "Market price data is unavailable. Check Alpaca API keys.", reason: "alpaca_unavailable" },
+      { status: 503 }
+    );
   }
-  return NextResponse.json({ quote });
+
+  try {
+    const quote = await getQuote(symbol);
+    if (!quote) {
+      return NextResponse.json({ error: "No market data available for this symbol." }, { status: 404 });
+    }
+    return NextResponse.json({ quote });
+  } catch {
+    return NextResponse.json(
+      { error: "Market price data is unavailable. Check Alpaca API keys.", reason: "alpaca_unavailable" },
+      { status: 503 }
+    );
+  }
 }

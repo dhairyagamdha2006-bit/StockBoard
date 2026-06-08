@@ -79,6 +79,18 @@ describe("syncBrokerAccount", () => {
     expect(fetchSchwabHoldings).not.toHaveBeenCalled();
   });
 
+  it("never deletes or upserts holdings for a token-less CSV account (Sync Now is safe)", async () => {
+    const { client, store } = createFakeSupabase();
+    // A CSV import is token-less; syncing it must not touch its holdings.
+    const res = await syncBrokerAccount(
+      client,
+      account({ broker_name: "schwab", connection_type: "csv", access_token: null, refresh_token: null })
+    );
+    expect(res.skipped).toBe(true);
+    expect(store.calls.find((c) => c.table === "holdings" && c.op === "upsert")).toBeUndefined();
+    expect(store.calls.find((c) => c.table === "holdings" && c.op === "delete")).toBeUndefined();
+  });
+
   it("treats Fidelity as skipped (CSV-only)", async () => {
     const { client } = createFakeSupabase();
     const res = await syncBrokerAccount(client, account({ broker_name: "fidelity" }));

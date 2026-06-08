@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
-import { Search, Star, X, TrendingUp, TrendingDown } from "lucide-react";
+import { Search, Star, X, TrendingUp, TrendingDown, AlertTriangle } from "lucide-react";
 import { formatCurrency, formatPercent } from "@/lib/utils/formatters";
 import { clsx } from "clsx";
 
@@ -21,10 +21,26 @@ interface Quote {
   changePct: number;
 }
 
+// Popular stocks shown when the search box is empty. Always available — these
+// don't depend on Alpaca, so the page is useful even if live search is down.
+const POPULAR_STOCKS: AssetResult[] = [
+  { symbol: "AAPL", name: "Apple Inc." },
+  { symbol: "MSFT", name: "Microsoft Corp." },
+  { symbol: "NVDA", name: "NVIDIA Corp." },
+  { symbol: "TSLA", name: "Tesla Inc." },
+  { symbol: "AMZN", name: "Amazon.com Inc." },
+  { symbol: "GOOGL", name: "Alphabet Inc." },
+  { symbol: "META", name: "Meta Platforms Inc." },
+  { symbol: "SPY", name: "SPDR S&P 500 ETF" },
+  { symbol: "VOO", name: "Vanguard S&P 500 ETF" },
+];
+
 export default function MarketPage() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<AssetResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [searchWarning, setSearchWarning] = useState<string | null>(null);
   const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [loadingWatchlist, setLoadingWatchlist] = useState(true);
@@ -61,23 +77,35 @@ export default function MarketPage() {
     loadWatchlist();
   }, [loadWatchlist]);
 
-  // Debounced search.
+  // Debounced search. `searching` is ALWAYS cleared (finally) so the UI can
+  // never get stuck on "Searching…", even if the request fails.
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (query.trim().length === 0) {
       setResults([]);
+      setSearching(false);
+      setSearched(false);
+      setSearchWarning(null);
       return;
     }
     setSearching(true);
     debounceRef.current = setTimeout(async () => {
       try {
         const res = await fetch(`/api/market/search?q=${encodeURIComponent(query.trim())}`);
+        if (!res.ok) {
+          setResults([]);
+          setSearchWarning("Market search is temporarily unavailable. Please try again.");
+          return;
+        }
         const data = await res.json();
-        setResults(data.results ?? []);
+        setResults(Array.isArray(data.results) ? data.results : []);
+        setSearchWarning(typeof data.warning === "string" ? data.warning : null);
       } catch {
         setResults([]);
+        setSearchWarning("Market search is temporarily unavailable. Please try again.");
       } finally {
         setSearching(false);
+        setSearched(true);
       }
     }, 300);
   }, [query]);
@@ -117,10 +145,18 @@ export default function MarketPage() {
           aria-label="Search stocks"
           className="w-full pl-11 pr-4 py-3 text-sm rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-white dark:bg-gray-900 text-[#111] dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#4ade80]/30"
         />
-        {(results.length > 0 || searching) && (
+        {query.trim().length > 0 && (
           <div className="absolute z-10 mt-2 w-full bg-white dark:bg-gray-900 rounded-xl border border-black/[0.08] dark:border-white/[0.08] shadow-lg overflow-hidden max-h-80 overflow-y-auto">
+            {searchWarning && (
+              <div className="flex items-start gap-2 px-4 py-2.5 bg-amber-50 dark:bg-amber-500/10 border-b border-amber-200 dark:border-amber-500/30">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />
+                <p className="text-[11px] font-sans text-amber-700 dark:text-amber-300">{searchWarning}</p>
+              </div>
+            )}
             {searching && results.length === 0 ? (
               <p className="px-4 py-3 text-xs text-gray-400 font-sans">Searching…</p>
+            ) : results.length === 0 && searched ? (
+              <p className="px-4 py-3 text-xs text-gray-400 font-sans">No matches found.</p>
             ) : (
               results.map((r) => (
                 <div key={r.symbol} className="flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800">
@@ -141,6 +177,33 @@ export default function MarketPage() {
           </div>
         )}
       </div>
+
+      {/* Popular stocks — shown when the search box is empty. */}
+      {query.trim().length === 0 && (
+        <div>
+          <h2 className="text-sm font-semibold font-sans text-[#111] dark:text-white mb-4">Popular stocks</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-3">
+            {POPULAR_STOCKS.map((s) => (
+              <div
+                key={s.symbol}
+                className="flex items-center justify-between bg-white dark:bg-gray-900 rounded-xl border border-black/[0.08] dark:border-white/[0.08] px-4 py-3 hover:border-[#4ade80]/40 transition-colors"
+              >
+                <Link href={`/dashboard/market/${s.symbol}`} className="flex-1 min-w-0">
+                  <p className="font-mono font-semibold text-sm text-[#111] dark:text-white">{s.symbol}</p>
+                  <p className="text-xs text-gray-400 font-sans truncate">{s.name}</p>
+                </Link>
+                <button
+                  onClick={() => (inWatchlist(s.symbol) ? removeFromWatchlist(s.symbol) : addToWatchlist(s))}
+                  aria-label={inWatchlist(s.symbol) ? `Remove ${s.symbol} from watchlist` : `Add ${s.symbol} to watchlist`}
+                  className={clsx("ml-3 shrink-0", inWatchlist(s.symbol) ? "text-[#facc15]" : "text-gray-300 hover:text-[#facc15]")}
+                >
+                  <Star className="w-4 h-4" fill={inWatchlist(s.symbol) ? "currentColor" : "none"} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Watchlist */}
       <div>

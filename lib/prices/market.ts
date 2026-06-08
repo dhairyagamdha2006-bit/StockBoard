@@ -135,18 +135,86 @@ export interface AssetResult {
   name: string;
 }
 
+export type SearchSource = "alpaca" | "fallback";
+
+export interface SearchResponse {
+  results: AssetResult[];
+  source: SearchSource;
+  warning?: string;
+}
+
+/**
+ * Static fallback list of popular US stocks/ETFs. Used when Alpaca's asset list
+ * is unavailable (missing credentials, slow, errored) so search never hangs and
+ * always returns usable results. These are well-known symbols, not fabricated.
+ */
+export const FALLBACK_ASSETS: AssetResult[] = [
+  { symbol: "AAPL", name: "Apple Inc." },
+  { symbol: "MSFT", name: "Microsoft Corp." },
+  { symbol: "NVDA", name: "NVIDIA Corp." },
+  { symbol: "TSLA", name: "Tesla Inc." },
+  { symbol: "AMZN", name: "Amazon.com Inc." },
+  { symbol: "GOOGL", name: "Alphabet Inc." },
+  { symbol: "GOOG", name: "Alphabet Inc." },
+  { symbol: "META", name: "Meta Platforms Inc." },
+  { symbol: "NFLX", name: "Netflix Inc." },
+  { symbol: "AMD", name: "Advanced Micro Devices Inc." },
+  { symbol: "INTC", name: "Intel Corp." },
+  { symbol: "JPM", name: "JPMorgan Chase & Co." },
+  { symbol: "BAC", name: "Bank of America Corp." },
+  { symbol: "WMT", name: "Walmart Inc." },
+  { symbol: "COST", name: "Costco Wholesale Corp." },
+  { symbol: "V", name: "Visa Inc." },
+  { symbol: "MA", name: "Mastercard Inc." },
+  { symbol: "DIS", name: "Walt Disney Co." },
+  { symbol: "SPY", name: "SPDR S&P 500 ETF" },
+  { symbol: "VOO", name: "Vanguard S&P 500 ETF" },
+  { symbol: "QQQ", name: "Invesco QQQ ETF" },
+];
+
+/** Symbols shown in the "Popular stocks" section when the search box is empty. */
+const POPULAR_SYMBOLS = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "SPY", "VOO"];
+
+/** The curated popular-stock list (always available, no Alpaca dependency). */
+export function getPopularAssets(): AssetResult[] {
+  return POPULAR_SYMBOLS.map(
+    (s) => FALLBACK_ASSETS.find((a) => a.symbol === s) ?? { symbol: s, name: s }
+  );
+}
+
+export const ALPACA_UNAVAILABLE_WARNING =
+  "Live market search is unavailable because Alpaca is not configured. Showing popular fallback symbols.";
+
+const ASSETS_TIMEOUT_MS = 5000;
+
 let assetsCache: AssetResult[] | null = null;
 let assetsExpires = 0;
 
-async function loadAssets(): Promise<AssetResult[]> {
+/**
+ * Load Alpaca's tradable asset list. Returns `null` (not an empty array) when
+ * Alpaca is unavailable so callers can distinguish "no matches" from "couldn't
+ * reach Alpaca" and fall back accordingly. Hard 5s timeout — never hangs.
+ */
+async function loadAlpacaAssets(): Promise<AssetResult[] | null> {
   if (assetsCache && assetsExpires > Date.now()) return assetsCache;
+
+  let headers: Record<string, string>;
+  try {
+    headers = authHeaders(); // throws if Alpaca creds are missing/placeholder
+  } catch {
+    return null;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ASSETS_TIMEOUT_MS);
   try {
     const res = await fetch(`${TRADING_BASE}/assets?status=active&asset_class=us_equity`, {
-      headers: authHeaders(),
+      headers,
+      signal: controller.signal,
     });
     if (!res.ok) {
       logger.warn("Alpaca assets request failed", { provider: "alpaca", status: res.status });
-      return assetsCache ?? [];
+      return assetsCache; // may be null
     }
     const data = (await res.json()) as { symbol: string; name: string; tradable: boolean }[];
     assetsCache = data
@@ -155,15 +223,15 @@ async function loadAssets(): Promise<AssetResult[]> {
     assetsExpires = Date.now() + 60 * 60_000; // 1 hour
     return assetsCache;
   } catch {
-    return assetsCache ?? [];
+    logger.warn("Alpaca assets request errored or timed out", { provider: "alpaca" });
+    return assetsCache; // may be null
+  } finally {
+    clearTimeout(timer);
   }
 }
 
-export async function searchAssets(query: string, limit = 15): Promise<AssetResult[]> {
-  const q = query.trim().toUpperCase();
-  if (q.length === 0) return [];
-  const assets = await loadAssets();
-
+/** Rank matches: exact symbol, symbol prefix, then symbol/name substring. */
+function matchAssets(assets: AssetResult[], q: string, limit: number): AssetResult[] {
   const starts: AssetResult[] = [];
   const contains: AssetResult[] = [];
   for (const a of assets) {
@@ -173,4 +241,29 @@ export async function searchAssets(query: string, limit = 15): Promise<AssetResu
     if (starts.length >= limit) break;
   }
   return [...starts, ...contains].slice(0, limit);
+}
+
+/**
+ * Search assets. Uses Alpaca's full asset list when available; falls back to the
+ * curated popular list when Alpaca is missing/slow/errored. Always returns
+ * promptly with a `source` flag and an optional `warning`.
+ */
+export async function searchAssets(query: string, limit = 15): Promise<SearchResponse> {
+  const q = query.trim().toUpperCase();
+  if (q.length === 0) return { results: [], source: "alpaca" };
+
+  const alpaca = await loadAlpacaAssets();
+
+  if (alpaca && alpaca.length > 0) {
+    const results = matchAssets(alpaca, q, limit);
+    if (results.length > 0) return { results, source: "alpaca" };
+    // Alpaca is reachable but returned no match — still surface fallback hits
+    // (e.g. common names) without a warning, since live search is working.
+    const fb = matchAssets(FALLBACK_ASSETS, q, limit);
+    return { results: fb, source: fb.length > 0 ? "fallback" : "alpaca" };
+  }
+
+  // Alpaca unavailable → fallback list with an honest warning.
+  const results = matchAssets(FALLBACK_ASSETS, q, limit);
+  return { results, source: "fallback", warning: ALPACA_UNAVAILABLE_WARNING };
 }

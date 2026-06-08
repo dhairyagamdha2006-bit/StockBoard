@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS broker_accounts (
   token_expires_at TIMESTAMPTZ,
   connection_type TEXT,
   status TEXT DEFAULT 'active',
+  -- Demo accounts are flagged so "Clear demo data" removes ONLY demo data and
+  -- never a real (also token-less) CSV import.
+  is_demo BOOLEAN NOT NULL DEFAULT FALSE,
   last_synced_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(user_id, broker_name)
@@ -74,6 +77,7 @@ CREATE TABLE IF NOT EXISTS portfolio_snapshots (
   total_value DECIMAL(18,2),
   total_gain_loss DECIMAL(18,2),
   snapshot_date DATE NOT NULL,
+  is_demo BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(user_id, snapshot_date)
 );

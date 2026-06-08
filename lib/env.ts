@@ -122,6 +122,16 @@ export function getAlpacaCreds(): { keyId: string; secretKey: string } {
   return { keyId, secretKey };
 }
 
+/** True if Alpaca market-data credentials are configured (no throw). */
+export function isAlpacaConfigured(): boolean {
+  try {
+    getAlpacaCreds();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export type SupportedOAuthBroker = "etrade" | "schwab";
 
 interface BrokerOAuthEnv {
