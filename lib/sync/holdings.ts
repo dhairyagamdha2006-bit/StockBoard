@@ -18,14 +18,105 @@ export interface ComputedHoldingRow {
   updated_at: string;
 }
 
+/**
+ * Merge duplicate tickers in a raw holdings array before any DB write.
+ *
+ * Postgres raises "ON CONFLICT DO UPDATE command cannot affect row a second
+ * time" when the same (account_id, ticker) appears more than once in a single
+ * upsert batch. This function guarantees exactly one element per uppercase
+ * ticker, so the batch is always safe.
+ *
+ * Merge rules:
+ *  - Shares are summed.
+ *  - average_cost is the share-weighted mean: Σ(shares × cost) / Σshares.
+ *  - current_price / previous_close: largest non-zero value wins.
+ *  - company_name: longest non-empty string wins (falls back to ticker).
+ *  - asset_type: first non-empty value wins.
+ *  - Rows with shares ≤ 0, NaN, or dust (shares < 1e-8 and no price signal)
+ *    are silently dropped before grouping.
+ */
+export function deduplicateHoldings(holdings: NormalizedHolding[]): {
+  deduplicated: NormalizedHolding[];
+  mergeWarnings: string[];
+} {
+  const VALID_TICKER = /^[A-Z0-9.\-]{1,12}$/;
+  const groups = new Map<string, NormalizedHolding[]>();
+
+  for (const h of holdings) {
+    const ticker = (h.ticker ?? "").toUpperCase().trim();
+    if (!ticker || !VALID_TICKER.test(ticker)) continue;
+    if (!Number.isFinite(h.shares) || h.shares <= 0) continue;
+    // Drop dust rows: negligible shares with no price signal whatsoever
+    if (h.shares < 1e-8 && h.current_price <= 0 && h.average_cost <= 0) continue;
+
+    const bucket = groups.get(ticker);
+    if (bucket) {
+      bucket.push({ ...h, ticker });
+    } else {
+      groups.set(ticker, [{ ...h, ticker }]);
+    }
+  }
+
+  const deduplicated: NormalizedHolding[] = [];
+  const mergeWarnings: string[] = [];
+
+  for (const [ticker, rows] of groups) {
+    if (rows.length === 1) {
+      deduplicated.push(rows[0]);
+      continue;
+    }
+
+    // Multiple rows for the same ticker — merge.
+    mergeWarnings.push(`${rows.length} ${ticker} rows were merged into one holding.`);
+
+    const totalShares = rows.reduce((s, r) => s + r.shares, 0);
+    const totalCost = rows.reduce((s, r) => s + r.shares * r.average_cost, 0);
+    const weightedAvgCost = totalShares > 0 ? totalCost / totalShares : 0;
+
+    // Largest non-zero price wins
+    const bestPrice = rows.reduce(
+      (best, r) => (r.current_price > 0 ? Math.max(best, r.current_price) : best),
+      0
+    );
+    const bestPrevClose = rows.reduce(
+      (best, r) => (r.previous_close > 0 ? Math.max(best, r.previous_close) : best),
+      0
+    );
+
+    // Longest non-empty company name
+    const bestName = rows.reduce((best, r) => {
+      const n = (r.company_name ?? "").trim();
+      return n.length > best.length ? n : best;
+    }, ticker);
+
+    // First non-empty asset_type
+    const assetType = rows.find((r) => r.asset_type && r.asset_type !== "")?.asset_type ?? "stock";
+
+    deduplicated.push({
+      ticker,
+      company_name: bestName,
+      shares: totalShares,
+      average_cost: weightedAvgCost,
+      current_price: bestPrice,
+      previous_close: bestPrevClose > 0 ? bestPrevClose : bestPrice,
+      asset_type: assetType,
+    });
+  }
+
+  return { deduplicated, mergeWarnings };
+}
+
 /** Turns raw broker holdings into fully-computed rows ready for upsert. */
 export function computeHoldingRows(
   userId: string,
   accountId: string,
   holdings: NormalizedHolding[]
 ): ComputedHoldingRow[] {
+  // Dedup first — guarantees exactly one row per ticker so the upsert batch
+  // can never trigger "ON CONFLICT DO UPDATE command cannot affect row a second time".
+  const { deduplicated } = deduplicateHoldings(holdings);
   const now = new Date().toISOString();
-  return holdings.map((h) => {
+  return deduplicated.map((h) => {
     const marketValue = h.shares * h.current_price;
     const invested = h.average_cost * h.shares;
     const dayChange = (h.current_price - h.previous_close) * h.shares;

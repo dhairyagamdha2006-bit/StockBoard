@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { parseBrokerCsv, CsvParseError } from "@/lib/brokers/csv-parsers";
-import { computeHoldingRows, replaceAccountHoldings, savePortfolioSnapshot } from "@/lib/sync/holdings";
+import {
+  computeHoldingRows,
+  deduplicateHoldings,
+  replaceAccountHoldings,
+  savePortfolioSnapshot,
+} from "@/lib/sync/holdings";
 import { enforceRateLimit } from "@/lib/utils/rateLimit";
 import { isBrokerName } from "@/lib/utils/validation";
 import { logger } from "@/lib/utils/logger";
@@ -67,11 +72,16 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ broker: st
     return NextResponse.json({ error: message }, { status: 400 });
   }
 
+  // Deduplicate before preview so the count and holdings list reflect what
+  // will actually be written, and merge warnings are surfaced to the user.
+  const { deduplicated: previewHoldings, mergeWarnings } = deduplicateHoldings(parsed.holdings);
+  const allWarnings = [...parsed.warnings, ...mergeWarnings];
+
   if (preview) {
     return NextResponse.json({
-      holdings: parsed.holdings,
-      count: parsed.holdings.length,
-      warnings: parsed.warnings,
+      holdings: previewHoldings,
+      count: previewHoldings.length,
+      warnings: allWarnings,
       parser: parsed.parser,
     });
   }
@@ -165,7 +175,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ broker: st
       success: true,
       count: upserted,
       removed,
-      warnings: parsed.warnings,
+      warnings: allWarnings,
       connectionKept,
     });
   } catch (err) {
