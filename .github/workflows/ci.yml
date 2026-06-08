@@ -1,8 +1,3 @@
-# ACTIVATION: move this file to `.github/workflows/ci.yml` to enable CI.
-# It lives at the repo root only because the push token lacked the `workflow`
-# scope. Easiest path: in the GitHub web UI, Add file → Create new file named
-# `.github/workflows/ci.yml` and paste this content (the web editor is allowed
-# to create workflows). Or re-push with a token that has the `workflow` scope.
 name: CI
 
 on:

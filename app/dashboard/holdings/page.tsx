@@ -195,7 +195,7 @@ export default function HoldingsPage() {
                 <tr>
                   <td colSpan={7} className="px-5 py-12 text-center text-sm text-gray-400 font-sans">
                     {holdings.length === 0
-                      ? "No holdings yet. Connect a broker, import a Fidelity CSV, or load demo data from the dashboard."
+                      ? "No holdings yet. Upload a CSV from any broker or load demo data from the dashboard."
                       : "No holdings match your filters."}
                   </td>
                 </tr>

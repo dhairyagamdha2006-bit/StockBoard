@@ -13,13 +13,23 @@ function CallbackHandler() {
 
   useEffect(() => {
     const code = params.get("code");
+    const state = params.get("state");
     if (!code) {
       setStatus("error");
       setErrorMsg("Missing authorization code. Please try again.");
       return;
     }
+    if (!state) {
+      setStatus("error");
+      setErrorMsg("Missing OAuth state. Please restart the connection.");
+      return;
+    }
 
-    fetch(`/api/connect/schwab?action=callback&code=${encodeURIComponent(code)}`)
+    // Both query params MUST be URL-encoded — Schwab's code/state can contain
+    // characters (=, /, +) that would otherwise corrupt the query string.
+    fetch(
+      `/api/connect/schwab?action=callback&code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`
+    )
       .then((r) => r.json())
       .then((data) => {
         if (data.success) {
