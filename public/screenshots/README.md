@@ -6,7 +6,7 @@
 #sign in 
 <img width="1375" height="765" alt="image" src="https://github.com/user-attachments/assets/33a73756-d7ff-4e6d-93c3-4cae42fe0fcf" />
 
-#Dahsboard 
+#Dashboard 
 <img width="1370" height="692" alt="image" src="https://github.com/user-attachments/assets/377d2007-dc83-4675-9e7c-576aec107adc" />
 
 #Holdings 
