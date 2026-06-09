@@ -72,19 +72,23 @@ CSV import is the reliable default connection method. OAuth integrations are opt
 
 ## Screenshots
 
-Screenshots should be placed in `public/screenshots`.
+### Front Page
+<img width="1278" height="797" alt="StockBoard front page" src="https://github.com/user-attachments/assets/1362202b-330a-4a3c-83ee-62a9c5f63c7a" />
 
-Recommended screenshots:
+### Sign In
+<img width="1375" height="765" alt="StockBoard sign in page" src="https://github.com/user-attachments/assets/33a73756-d7ff-4e6d-93c3-4cae42fe0fcf" />
 
-| Dashboard                                      | CSV Import                                       | Market Explorer                          |
-| ---------------------------------------------- | ------------------------------------------------ | ---------------------------------------- |
-| ![Dashboard](public/screenshots/dashboard.png) | ![CSV Import](public/screenshots/csv-import.png) | ![Market](public/screenshots/market.png) |
+### Dashboard
+<img width="1370" height="692" alt="StockBoard dashboard" src="https://github.com/user-attachments/assets/377d2007-dc83-4675-9e7c-576aec107adc" />
 
-| Stock Detail                                         | Sync Logs                                      | Analytics                                      |
-| ---------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------- |
-| ![Stock Detail](public/screenshots/stock-detail.png) | ![Sync Logs](public/screenshots/sync-logs.png) | ![Analytics](public/screenshots/analytics.png) |
+### Holdings
+<img width="1376" height="607" alt="StockBoard holdings table" src="https://github.com/user-attachments/assets/99658b40-beef-4267-a092-f50444671171" />
 
----
+### Market Explorer
+<img width="1390" height="729" alt="StockBoard market explorer" src="https://github.com/user-attachments/assets/5a94a800-598a-4cfb-8201-0e849001edfe" />
+
+### Analytics
+<img width="1394" height="743" alt="StockBoard analytics page" src="https://github.com/user-attachments/assets/595420c4-6888-4a4f-a929-a8b96a1e5276" />
 
 ## Getting Started
 
